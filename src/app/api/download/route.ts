@@ -31,14 +31,19 @@ async function buildSelfContainedHtml(html: string, baseUrl: string): Promise<st
   // Remove existing <base> tag
   result = result.replace(/<base\b[^>]*>/gi, "");
 
+  // 0. First fix protocol-relative URLs everywhere so CSS inlining works
+  result = result.replace(/(href=["'])(\/\/)/gi, "$1https://");
+
   // 1. Inline external CSS stylesheets
-  const linkRegex = /<link\b[^>]*?href=["']([^"']+\.css[^"']*)["'][^>]*>/gi;
+  const linkRegex = /<link\b[^>]*?href=["']([^"']+)["'][^>]*>/gi;
   const cssLinks: { fullMatch: string; url: string }[] = [];
   let match;
   while ((match = linkRegex.exec(result)) !== null) {
     // Only process stylesheet links
-    if (!match[0].includes("stylesheet") && !match[0].includes(".css")) continue;
-    const url = match[1].startsWith("http") ? match[1] : `${baseUrl}${match[1].startsWith("/") ? "" : "/"}${match[1]}`;
+    if (!match[0].includes("stylesheet")) continue;
+    let url = match[1];
+    if (url.startsWith("//")) url = `https:${url}`;
+    else if (!url.startsWith("http")) url = `${baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
     cssLinks.push({ fullMatch: match[0], url });
   }
 
@@ -59,31 +64,36 @@ async function buildSelfContainedHtml(html: string, baseUrl: string): Promise<st
     }
   }
 
-  // 2. Make all remaining relative URLs absolute
-  // src attributes
+  // 2. Fix all protocol-relative URLs (//) → https:// everywhere in the HTML
+  result = result.replace(/(?:src|href|srcset|data-src|data-srcset)(=["'])\s*\/\//gi, (m) => m.replace("//", "https://"));
+  // Also inside srcset values (comma-separated)
+  result = result.replace(/, \/\//g, ", https://");
+  result = result.replace(/url\(["']?\/\//gi, 'url("https://');
+
+  // 3. Promote data-src/data-srcset to src/srcset (lazy-load images won't load without JS)
+  result = result.replace(/\bdata-src=/gi, "src=");
+  result = result.replace(/\bdata-srcset=/gi, "srcset=");
+
+  // 4. Convert root-relative URLs (/path) to absolute — but NOT protocol-relative (//)
   result = result.replace(
-    /(src=["'])((?!data:|blob:|javascript:|https?:|#)\/[^"']*)(["'])/gi,
+    /((?:src|href)=["'])(\/(?!\/)[^"']*)(["'])/gi,
     (_m, pre, url, suf) => `${pre}${baseUrl}${url}${suf}`
   );
 
-  // href attributes (but not anchors)
-  result = result.replace(
-    /(href=["'])((?!data:|blob:|javascript:|https?:|#|mailto:)\/[^"']*)(["'])/gi,
-    (_m, pre, url, suf) => `${pre}${baseUrl}${url}${suf}`
-  );
-
-  // srcset attributes
+  // srcset attributes — fix root-relative entries
   result = result.replace(
     /(srcset=["'])([^"']+)(["'])/gi,
     (_m, pre, srcset, suf) => {
-      const fixed = srcset.replace(/(^|,\s*)(\/[^\s,]+)/g, (_m2: string, sep: string, url: string) => `${sep}${baseUrl}${url}`);
+      const fixed = srcset
+        .replace(/(^|,\s*)(\/(?!\/)[^\s,]+)/g, (_m2: string, sep: string, url: string) => `${sep}${baseUrl}${url}`)
+        .replace(/(^|,\s*)(\/\/[^\s,]+)/g, (_m2: string, sep: string, url: string) => `${sep}https:${url}`);
       return `${pre}${fixed}${suf}`;
     }
   );
 
-  // CSS url() in inline styles
+  // CSS url() in inline styles — root-relative only
   result = result.replace(
-    /url\(["']?(?!data:|blob:|https?:)(\/[^)"']+)["']?\)/gi,
+    /url\(["']?(\/(?!\/)[^)"']+)["']?\)/gi,
     (_m, url) => `url("${baseUrl}${url}")`
   );
 
