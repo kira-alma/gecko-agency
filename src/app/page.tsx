@@ -401,10 +401,23 @@ export default function Home() {
   };
 
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
 
-  const handleDownload = async () => {
+  const triggerDownload = async (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadPage = async () => {
     if (!result) return;
     setIsDownloading(true);
+    setShowDownloadMenu(false);
     try {
       const res = await fetch("/api/download", {
         method: "POST",
@@ -417,19 +430,170 @@ export default function Home() {
       });
       if (!res.ok) throw new Error("Download failed");
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] || "geckocheck-export.zip";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const filename = res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] || "geckocheck-export.zip";
+      await triggerDownload(blob, filename);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const handleDownloadReport = () => {
+    if (!result) return;
+    setShowDownloadMenu(false);
+
+    const safeName = (result.pageTitle || "page").replace(/[^a-zA-Z0-9-_ ]/g, "_").slice(0, 50);
+
+    // Strip HTML to readable text
+    const strip = (html: string) => html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ").trim();
+
+    // Simple word diff → HTML with colored spans
+    const wordDiff = (oldText: string, newText: string): string => {
+      if (!oldText && newText) return `<span class="added">${esc(newText)}</span>`;
+      if (oldText && !newText) return `<span class="removed">${esc(oldText)}</span>`;
+      const oldWords = oldText.split(/(\s+)/);
+      const newWords = newText.split(/(\s+)/);
+      const m = oldWords.length, n = newWords.length;
+      if (m * n > 50000) {
+        return `<span class="removed">${esc(oldText)}</span><br><span class="added">${esc(newText)}</span>`;
+      }
+      const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+      for (let i = 1; i <= m; i++)
+        for (let j = 1; j <= n; j++)
+          dp[i][j] = oldWords[i-1] === newWords[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+      const parts: { type: string; text: string }[] = [];
+      let i = m, j = n;
+      while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && oldWords[i-1] === newWords[j-1]) { parts.push({ type: "same", text: oldWords[--i] }); j--; }
+        else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { parts.push({ type: "added", text: newWords[--j] }); }
+        else { parts.push({ type: "removed", text: oldWords[--i] }); }
+      }
+      parts.reverse();
+      return parts.map(p => p.type === "removed" ? `<span class="removed">${esc(p.text)}</span>`
+        : p.type === "added" ? `<span class="added">${esc(p.text)}</span>`
+        : esc(p.text)).join("");
+    };
+
+    const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const reportHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GeckoCheck Report — ${esc(result.pageTitle)}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e5e5e5; padding: 40px; line-height: 1.6; max-width: 900px; margin: 0 auto; }
+  .header { margin-bottom: 40px; }
+  .header h1 { font-size: 24px; color: #fff; margin-bottom: 4px; }
+  .header p { color: #888; font-size: 14px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-right: 8px; }
+  .badge-content { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .badge-seo { background: rgba(168,85,247,0.2); color: #c084fc; }
+  .badge-structure { background: rgba(245,158,11,0.2); color: #fbbf24; }
+  .badge-branding { background: rgba(16,185,129,0.2); color: #34d399; }
+  .stats { display: flex; gap: 16px; margin: 24px 0; flex-wrap: wrap; }
+  .stat { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; min-width: 100px; }
+  .stat-number { font-size: 28px; font-weight: 700; color: #fff; }
+  .stat-label { font-size: 11px; color: #888; margin-top: 4px; }
+  .change { background: #111; border: 1px solid #222; border-radius: 12px; margin-bottom: 24px; overflow: hidden; }
+  .change-header { padding: 16px 20px; border-bottom: 1px solid #222; display: flex; align-items: center; gap: 12px; }
+  .change-num { width: 28px; height: 28px; border-radius: 8px; background: #222; color: #888; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  .change-title { font-size: 15px; font-weight: 600; color: #fff; }
+  .change-body { padding: 16px 20px; }
+  .diff-inline { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 14px 18px; font-size: 14px; line-height: 1.8; color: #999; }
+  .diff-inline .removed { background: rgba(239,68,68,0.15); color: #fca5a5; text-decoration: line-through; padding: 1px 3px; border-radius: 3px; }
+  .diff-inline .added { background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 1px 3px; border-radius: 3px; }
+  .new-content { background: rgba(16,185,129,0.05); border: 1px solid rgba(16,185,129,0.2); border-radius: 8px; padding: 14px 18px; font-size: 14px; color: #6ee7b7; line-height: 1.8; }
+  .new-label { display: inline-block; background: rgba(16,185,129,0.15); color: #34d399; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-bottom: 10px; }
+  .meta-change { display: flex; flex-direction: column; gap: 8px; }
+  .meta-label { display: inline-block; background: #222; color: #aaa; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-bottom: 4px; }
+  .meta-before { background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.12); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #ccc; }
+  .meta-after { background: rgba(16,185,129,0.05); border: 1px solid rgba(16,185,129,0.12); border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #e5e5e5; }
+  .meta-sublabel { font-size: 10px; font-weight: 600; margin-bottom: 4px; }
+  .meta-sublabel-before { color: #f87171; }
+  .meta-sublabel-after { color: #34d399; }
+  .reasoning { padding: 16px 20px; border-top: 1px solid #222; background: #0d0d0d; }
+  .reasoning-title { font-size: 11px; color: #888; font-weight: 600; margin-bottom: 6px; }
+  .reasoning-text { font-size: 13px; color: #ccc; }
+  .insight-box { background: rgba(16,185,129,0.05); border: 1px solid rgba(16,185,129,0.15); border-radius: 8px; padding: 12px 16px; margin-top: 12px; }
+  .insight-label { font-size: 11px; color: #34d399; font-weight: 600; margin-bottom: 4px; }
+  .insight-text { font-size: 13px; color: rgba(52,211,153,0.8); font-style: italic; }
+  .brand-box { background: rgba(59,130,246,0.05); border: 1px solid rgba(59,130,246,0.15); border-radius: 8px; padding: 12px 16px; margin-top: 12px; }
+  .brand-label { font-size: 11px; color: #60a5fa; font-weight: 600; margin-bottom: 4px; }
+  .brand-text { font-size: 13px; color: rgba(96,165,250,0.8); }
+  .footer { text-align: center; color: #444; font-size: 11px; margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div style="color:#34d399;font-size:12px;font-weight:600;margin-bottom:12px;">GECKOCHECK OPTIMIZATION REPORT</div>
+  <h1>${esc(result.pageTitle)}</h1>
+  <p>${esc(result.pageUrl)}</p>
+  <div class="stats">
+    <div class="stat"><div class="stat-number">${result.changes.length}</div><div class="stat-label">Total Changes</div></div>
+  </div>
+</div>
+${result.changes.map((c, i) => {
+  const isMeta = c.originalSnippet.trim().startsWith("<meta") || c.originalSnippet.includes("<title") || c.originalSnippet.includes("application/ld+json");
+  const oldText = strip(c.originalSnippet);
+  const newText = strip(c.modifiedSnippet);
+  const isNewContent = !oldText && newText;
+  const isJsonLd = c.modifiedSnippet.includes("application/ld+json") || c.modifiedSnippet.includes('"@context"');
+
+  let diffHtml: string;
+  if (isJsonLd) {
+    const types = [...c.modifiedSnippet.matchAll(/"@type"\s*:\s*"([^"]+)"/g)].map(m => m[1]);
+    const visibleText = newText.replace(/\{[\s\S]*\}/g, "").trim();
+    diffHtml = `<div class="new-label">New Content + Structured Data</div>` +
+      (visibleText ? `<div class="new-content">${esc(visibleText.slice(0, 500))}</div>` : "") +
+      `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${types.map(t => `<span class="badge badge-seo">${esc(t)}</span>`).join("")}</div>`;
+  } else if (isNewContent) {
+    diffHtml = `<div class="new-label">New Content Added</div><div class="new-content">${esc(newText.slice(0, 600))}</div>`;
+  } else if (isMeta) {
+    const descMatch = (s: string) => (s.match(/content="([^"]*)"/)?.[1] || strip(s));
+    const label = c.originalSnippet.includes('name="description"') ? "Meta Description"
+      : c.originalSnippet.includes("<title") ? "Page Title" : "Meta Tag";
+    diffHtml = `<div class="meta-change"><span class="meta-label">${label}</span>` +
+      `<div class="meta-sublabel meta-sublabel-before">Before</div><div class="meta-before">${esc(descMatch(c.originalSnippet))}</div>` +
+      `<div class="meta-sublabel meta-sublabel-after">After</div><div class="meta-after">${esc(descMatch(c.modifiedSnippet))}</div></div>`;
+  } else if (oldText === newText) {
+    diffHtml = `<div style="color:#888;font-style:italic;font-size:13px;">Structural change — visible content unchanged</div>`;
+  } else {
+    diffHtml = `<div class="diff-inline">${wordDiff(oldText, newText)}</div>`;
+  }
+
+  return `
+<div class="change">
+  <div class="change-header">
+    <div class="change-num">${i + 1}</div>
+    <span class="badge badge-${c.category}">${esc(c.category)}</span>
+    <span class="change-title">${esc(c.description)}</span>
+  </div>
+  <div class="change-body">${diffHtml}</div>
+  <div class="reasoning">
+    <div class="reasoning-title">Strategic Rationale</div>
+    <div class="reasoning-text">${esc(c.reasoning)}</div>
+    <div class="insight-box">
+      <div class="insight-label">GeckoCheck Insight</div>
+      <div class="insight-text">"${esc(c.sourceInsight)}"</div>
+    </div>
+    ${c.brandAlignment ? `<div class="brand-box"><div class="brand-label">Brand Compliance</div><div class="brand-text">${esc(c.brandAlignment)}</div></div>` : ""}
+  </div>
+</div>`;
+}).join("")}
+<div class="footer">Generated by GeckoCheck Page Optimizer — ${new Date().toISOString().split("T")[0]}</div>
+</body>
+</html>`;
+
+    const blob = new Blob([reportHtml], { type: "text/html" });
+    triggerDownload(blob, `geckocheck-report-${safeName}.html`);
   };
 
   const handleClearFeedback = () => {
@@ -538,23 +702,50 @@ export default function Home() {
               {result.changes.length} changes
             </span>
 
-            <button
-              onClick={handleDownload}
-              disabled={isDownloading}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 transition-all disabled:opacity-50"
-            >
-              {isDownloading ? (
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            <div className="relative ml-2">
+              <button
+                onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                disabled={isDownloading}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 transition-all disabled:opacity-50"
+              >
+                {isDownloading ? (
+                  <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                )}
+                {isDownloading ? "Zipping..." : "Download"}
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
+              </button>
+              {showDownloadMenu && (
+                <div className="absolute right-0 top-full mt-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 w-52 py-1">
+                  <button
+                    onClick={handleDownloadPage}
+                    className="w-full text-left px-4 py-2.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                    </svg>
+                    Optimized Page (.zip)
+                  </button>
+                  <button
+                    onClick={handleDownloadReport}
+                    className="w-full text-left px-4 py-2.5 text-xs text-gray-300 hover:bg-gray-800 hover:text-white transition-colors flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Changes Report (.html)
+                  </button>
+                </div>
               )}
-              {isDownloading ? "Zipping..." : "Download"}
-            </button>
+            </div>
 
             <button
               onClick={handleNewGeneration}

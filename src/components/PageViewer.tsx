@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Change } from "@/lib/claude";
-import DiffView from "./DiffView";
 
 interface PageViewerProps {
   originalHtml: string;
@@ -79,19 +78,43 @@ function injectHighlightStyles(html: string): string {
   const style = `
     <style>
       [data-gecko-change] {
-        outline: 2px solid #10b981 !important;
+        outline: 3px solid #10b981 !important;
         outline-offset: 2px;
+        background-color: rgba(16, 185, 129, 0.08) !important;
         position: relative !important;
         cursor: pointer !important;
-        transition: outline-color 0.2s, background-color 0.2s !important;
+        transition: outline-color 0.2s, background-color 0.2s, box-shadow 0.2s !important;
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.3) !important;
+      }
+      [data-gecko-change]::before {
+        content: attr(data-gecko-change);
+        position: absolute !important;
+        top: -18px;
+        left: 0;
+        background: #10b981 !important;
+        color: white !important;
+        font-size: 9px !important;
+        font-family: system-ui, sans-serif !important;
+        padding: 1px 6px !important;
+        border-radius: 3px !important;
+        z-index: 10000 !important;
+        pointer-events: none !important;
+        white-space: nowrap !important;
       }
       [data-gecko-change]:hover {
         outline-color: #34d399 !important;
-        background-color: rgba(16, 185, 129, 0.08) !important;
+        background-color: rgba(16, 185, 129, 0.15) !important;
+        box-shadow: 0 0 16px rgba(16, 185, 129, 0.5) !important;
       }
       [data-gecko-change].gecko-hidden {
         outline: 2px dashed #ef4444 !important;
+        background-color: rgba(239, 68, 68, 0.05) !important;
+        box-shadow: none !important;
         opacity: 0.5 !important;
+      }
+      [data-gecko-change].gecko-hidden::before {
+        background: #ef4444 !important;
+        content: 'disabled';
       }
       .gecko-tooltip {
         position: fixed;
@@ -130,7 +153,7 @@ export default function PageViewer({
   changes,
   baseUrl,
 }: PageViewerProps) {
-  const [viewMode, setViewMode] = useState<"modified" | "original" | "split" | "diff">(
+  const [viewMode, setViewMode] = useState<"modified" | "original" | "split">(
     "modified"
   );
   const [disabledChanges, setDisabledChanges] = useState<Set<string>>(
@@ -203,7 +226,7 @@ export default function PageViewer({
 
           {/* View Toggle */}
           <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
-            {(["modified", "original", "split", "diff"] as const).map((mode) => (
+            {(["modified", "original", "split"] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
@@ -217,9 +240,7 @@ export default function PageViewer({
                   ? "Modified"
                   : mode === "original"
                     ? "Original"
-                    : mode === "split"
-                      ? "Split"
-                      : "Diff"}
+                    : "Split"}
               </button>
             ))}
           </div>
@@ -328,52 +349,46 @@ export default function PageViewer({
 
       {/* Page Preview */}
       <div className="flex-1 flex flex-col bg-white">
-        {viewMode === "diff" ? (
-          <DiffView originalHtml={originalHtml} modifiedHtml={modifiedHtml} />
-        ) : (
-          <>
-            {/* View Label */}
-            <div className="bg-gray-950 px-4 py-2 flex items-center gap-4 border-b border-gray-800">
-              {viewMode === "split" ? (
-                <>
-                  <span className="text-xs font-medium text-red-400 flex-1 text-center">
-                    ORIGINAL
-                  </span>
-                  <div className="w-px h-4 bg-gray-700" />
-                  <span className="text-xs font-medium text-emerald-400 flex-1 text-center">
-                    MODIFIED
-                  </span>
-                </>
-              ) : (
-                <span
-                  className={`text-xs font-medium ${viewMode === "original" ? "text-red-400" : "text-emerald-400"}`}
-                >
-                  {viewMode === "original" ? "ORIGINAL" : "MODIFIED"} VIEW
-                </span>
-              )}
-            </div>
+        {/* View Label */}
+        <div className="bg-gray-950 px-4 py-2 flex items-center gap-4 border-b border-gray-800">
+          {viewMode === "split" ? (
+            <>
+              <span className="text-xs font-medium text-red-400 flex-1 text-center">
+                ORIGINAL
+              </span>
+              <div className="w-px h-4 bg-gray-700" />
+              <span className="text-xs font-medium text-emerald-400 flex-1 text-center">
+                MODIFIED — changes highlighted
+              </span>
+            </>
+          ) : (
+            <span
+              className={`text-xs font-medium ${viewMode === "original" ? "text-red-400" : "text-emerald-400"}`}
+            >
+              {viewMode === "original" ? "ORIGINAL" : "MODIFIED"} VIEW
+            </span>
+          )}
+        </div>
 
-            {/* Iframe(s) */}
-            <div className="flex-1 flex">
-              {(viewMode === "original" || viewMode === "split") && originalBlobUrl && (
-                <iframe
-                  ref={originalIframeRef}
-                  src={originalBlobUrl}
-                  className={`${viewMode === "split" ? "w-1/2 border-r border-gray-300" : "w-full"} h-full`}
-                  title="Original page"
-                />
-              )}
-              {(viewMode === "modified" || viewMode === "split") && modifiedBlobUrl && (
-                <iframe
-                  ref={iframeRef}
-                  src={modifiedBlobUrl}
-                  className={`${viewMode === "split" ? "w-1/2" : "w-full"} h-full`}
-                  title="Modified page"
-                />
-              )}
-            </div>
-          </>
-        )}
+        {/* Iframe(s) */}
+        <div className="flex-1 flex">
+          {(viewMode === "original" || viewMode === "split") && originalBlobUrl && (
+            <iframe
+              ref={originalIframeRef}
+              src={originalBlobUrl}
+              className={`${viewMode === "split" ? "w-1/2 border-r border-gray-300" : "w-full"} h-full`}
+              title="Original page"
+            />
+          )}
+          {(viewMode === "modified" || viewMode === "split") && modifiedBlobUrl && (
+            <iframe
+              ref={iframeRef}
+              src={modifiedBlobUrl}
+              className={`${viewMode === "split" ? "w-1/2" : "w-full"} h-full`}
+              title="Modified page"
+            />
+          )}
+        </div>
       </div>
     </div>
   );
