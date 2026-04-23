@@ -1,13 +1,11 @@
 services:
   - type: web
     name: geckocheck
-    runtime: node
-    plan: standard
-    buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
-    startCommand: npm start
+    runtime: docker
+    plan: starter
     disk:
       name: geckocheck-data
-      mountPath: /opt/render/project/src/data
+      mountPath: /app/data
       sizeGB: 1
     envVars:
       - key: OPENROUTER_API_KEY
