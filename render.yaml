@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: geckocheck
+    runtime: node
+    plan: standard
+    buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
+    startCommand: npm start
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
