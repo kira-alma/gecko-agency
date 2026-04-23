@@ -289,29 +289,18 @@ export default function AdvancedPromptView({
         isModified={genericPrompt !== defaultGenericRef.current}
       />
 
-      {/* Page-Specific Prompt — shows the full combined prompt (brand + reviewer instructions) */}
+      {/* Page-Specific Prompt — editable directly */}
       <PromptSection
-        title="Page-Specific Prompt (Live Preview)"
+        title="Page-Specific Prompt"
         content={pageSpecificPrompt}
         defaultOpen={true}
         accentColor="amber"
         badge="This Page"
+        editable
+        onChange={onPageSpecificPromptChange}
+        onReset={() => onPageSpecificPromptChange("")}
+        isModified={!!editedPagePrompt}
       />
-
-      {/* Editable page base prompt — manual overrides */}
-      {editedPagePrompt !== undefined && (
-        <PromptSection
-          title="Page Prompt Override (Editable)"
-          content={editedPagePrompt || ""}
-          defaultOpen={false}
-          accentColor="amber"
-          badge="Custom"
-          editable
-          onChange={onPageSpecificPromptChange}
-          onReset={() => onPageSpecificPromptChange("")}
-          isModified={!!editedPagePrompt}
-        />
-      )}
 
       {/* User Prompt */}
       {userPrompt ? (

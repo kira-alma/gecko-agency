@@ -5,7 +5,13 @@ export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
   try {
-    const { feedbackMessages, existingInstructions, model } = await request.json();
+    const {
+      feedbackMessages,
+      existingGenericInstructions,
+      existingPageInstructions,
+      pageUrl,
+      model,
+    } = await request.json();
 
     if (!feedbackMessages || feedbackMessages.length === 0) {
       return NextResponse.json(
@@ -14,15 +20,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const systemPrompt = `You are a prompt engineering assistant for GeckoCheck, a tool that optimizes retailer product pages. You receive feedback from a sales team reviewer about AI-generated page changes. Your job is to convert their feedback into clear, concise instructions that will be added to the page generation prompt.
+    const systemPrompt = `You are a prompt engineering assistant for GeckoCheck, a tool that optimizes retailer product pages. You receive feedback from a sales team reviewer. Your job is to convert their feedback into clear, concise instructions AND classify each instruction as either GENERIC or PAGE-SPECIFIC.
 
-Rules:
-1. Summarize feedback into actionable directives (e.g., "Shorten the FAQ section to 3 questions maximum" not "the user said the FAQ is too long")
-2. If there are existing instructions, merge new feedback with them — do not duplicate. Update or override conflicting instructions.
-3. Keep instructions concise — no more than 15 bullet points total
+CLASSIFICATION RULES:
+- GENERIC instructions apply to ALL pages across ALL brands. Examples:
+  "Always include pricing comparisons", "Keep FAQs to 5 questions max", "Never invent claims not on the source page", "Always add JSON-LD structured data", "Use bullet points instead of paragraphs for key features"
+- PAGE-SPECIFIC instructions apply only to this particular page/brand. Examples:
+  "Add SodaStream cylinder compatibility info", "Include the $16.99 exchange price", "Mention the pink vs blue cylinder difference", "Shorten the CO2 refill FAQ section"
+
+When in doubt, classify as PAGE-SPECIFIC (safer — doesn't affect other pages).
+
+MERGE RULES:
+1. Merge new feedback with existing instructions — do not duplicate
+2. Update or override conflicting instructions
+3. Max 15 bullet points per category
 4. Preserve the reviewer's intent faithfully
-5. Output ONLY the final list of instructions, one per line, each starting with a dash (-)
-6. Do NOT include any preamble, explanation, or commentary — just the dash-prefixed list`;
+
+OUTPUT FORMAT (strict — no other text):
+[GENERIC]
+- instruction 1
+- instruction 2
+
+[PAGE-SPECIFIC]
+- instruction 1
+- instruction 2
+
+If a category has no instructions, still include the header with no items below it.`;
 
     const conversationText = feedbackMessages
       .map((m: { role: string; content: string }) =>
@@ -30,14 +53,14 @@ Rules:
       )
       .join("\n");
 
-    const userPrompt = `${
-      existingInstructions
-        ? `=== CURRENT INSTRUCTIONS ===\n${existingInstructions}\n\n`
-        : ""
-    }=== NEW FEEDBACK FROM REVIEWER ===
+    const userPrompt = `Page being optimized: ${pageUrl || "unknown"}
+
+${existingGenericInstructions ? `=== CURRENT GENERIC INSTRUCTIONS ===\n${existingGenericInstructions}\n` : ""}
+${existingPageInstructions ? `=== CURRENT PAGE-SPECIFIC INSTRUCTIONS ===\n${existingPageInstructions}\n` : ""}
+=== NEW FEEDBACK FROM REVIEWER ===
 ${conversationText}
 
-Produce the updated list of instructions incorporating all feedback. Remember: output ONLY the dash-prefixed list, nothing else.`;
+Classify and produce the updated instructions. Output ONLY the [GENERIC] and [PAGE-SPECIFIC] sections.`;
 
     const text = await callOpenRouter(
       systemPrompt,
@@ -45,14 +68,26 @@ Produce the updated list of instructions incorporating all feedback. Remember: o
       model || "openai/gpt-5"
     );
 
-    // Clean up — ensure we only have the dash-prefixed lines
-    const instructions = text
-      .split("\n")
-      .map((l: string) => l.trim())
-      .filter((l: string) => l.startsWith("-"))
-      .join("\n");
+    // Parse the two sections
+    const genericMatch = text.match(/\[GENERIC\]([\s\S]*?)(?=\[PAGE-SPECIFIC\]|$)/i);
+    const pageMatch = text.match(/\[PAGE-SPECIFIC\]([\s\S]*?)$/i);
 
-    return NextResponse.json({ instructions: instructions || text.trim() });
+    const extractLines = (section: string | undefined): string => {
+      if (!section) return "";
+      return section
+        .split("\n")
+        .map((l: string) => l.trim())
+        .filter((l: string) => l.startsWith("-"))
+        .join("\n");
+    };
+
+    const genericInstructions = extractLines(genericMatch?.[1]);
+    const pageInstructions = extractLines(pageMatch?.[1]);
+
+    return NextResponse.json({
+      genericInstructions,
+      pageInstructions,
+    });
   } catch (error) {
     console.error("Summarize feedback error:", error);
     return NextResponse.json(

@@ -56,12 +56,25 @@ export default function Home() {
   const [editedGenericPrompt, setEditedGenericPrompt] = useState("");
   const [editedPagePrompt, setEditedPagePrompt] = useState("");
 
-  // Feedback & prompt state — persists across re-generations
-  const [customInstructions, setCustomInstructions] = useState("");
-  const [previousInstructions, setPreviousInstructions] = useState("");
+  // Feedback instructions — split into generic (all pages) and page-specific
+  const [genericInstructions, setGenericInstructions] = useState("");
+  const [pageInstructions, setPageInstructions] = useState("");
+  const [previousGenericInstructions, setPreviousGenericInstructions] = useState("");
+  const [previousPageInstructions, setPreviousPageInstructions] = useState("");
   const [feedbackMessages, setFeedbackMessages] = useState<FeedbackMessage[]>(
     []
   );
+
+  // Combined instructions for the LLM and display
+  const customInstructions = [
+    genericInstructions ? `[GENERIC — applies to all pages]\n${genericInstructions}` : "",
+    pageInstructions ? `[PAGE-SPECIFIC]\n${pageInstructions}` : "",
+  ].filter(Boolean).join("\n\n");
+
+  const previousInstructions = [
+    previousGenericInstructions ? `[GENERIC — applies to all pages]\n${previousGenericInstructions}` : "",
+    previousPageInstructions ? `[PAGE-SPECIFIC]\n${previousPageInstructions}` : "",
+  ].filter(Boolean).join("\n\n");
 
   // Persisted inputs for re-generation
   const [lastInputs, setLastInputs] = useState<{
@@ -76,12 +89,13 @@ export default function Home() {
 
   const currentPageUrl = lastInputs?.pageUrl || "";
 
-  // Load from database on mount (generic prompt)
+  // Load from database on mount (generic prompt + generic instructions)
   useEffect(() => {
     fetch("/api/prompts?pageUrl=")
       .then((r) => r.json())
       .then((data) => {
         if (data.genericPrompt) setEditedGenericPrompt(data.genericPrompt);
+        if (data.genericInstructions) setGenericInstructions(data.genericInstructions);
       })
       .catch(() => {});
   }, []);
@@ -93,7 +107,7 @@ export default function Home() {
       .then((r) => r.json())
       .then((data) => {
         if (data.pagePrompt) setEditedPagePrompt(data.pagePrompt);
-        if (data.customInstructions) setCustomInstructions(data.customInstructions);
+        if (data.customInstructions) setPageInstructions(data.customInstructions);
         // Chat messages are NOT loaded — they are session-only
       })
       .catch(() => {});
@@ -297,7 +311,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           feedbackMessages: newMessages,
-          existingInstructions: customInstructions,
+          existingGenericInstructions: genericInstructions,
+          existingPageInstructions: pageInstructions,
+          pageUrl: currentPageUrl,
           model: selectedModel,
         }),
       });
@@ -306,22 +322,47 @@ export default function Home() {
         throw new Error("Failed to process feedback");
       }
 
-      const { instructions } = await res.json();
-      setPreviousInstructions(customInstructions);
-      setCustomInstructions(instructions);
+      const data = await res.json();
+      const newGeneric = data.genericInstructions || "";
+      const newPage = data.pageInstructions || "";
 
-      // Compute diff between old and new instructions
-      const oldLines = new Set(
-        previousInstructions.split("\n").map((l: string) => l.trim()).filter(Boolean)
+      // Save previous for diffing
+      setPreviousGenericInstructions(genericInstructions);
+      setPreviousPageInstructions(pageInstructions);
+
+      // Update state
+      setGenericInstructions(newGeneric);
+      setPageInstructions(newPage);
+
+      // Save to DB
+      const changeNote = `feedback: ${message.slice(0, 50)}`;
+      if (newGeneric !== genericInstructions) {
+        fetch("/api/prompts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "setGenericInstructions", customInstructions: newGeneric, changeNote }),
+        }).catch(() => {});
+      }
+      if (newPage !== pageInstructions) {
+        saveInstructions(newPage, changeNote);
+      }
+
+      // Build diff summary
+      const oldAllLines = new Set(
+        [...genericInstructions.split("\n"), ...pageInstructions.split("\n")]
+          .map((l) => l.trim()).filter(Boolean)
       );
-      const newLines = instructions.split("\n").map((l: string) => l.trim()).filter(Boolean);
-      const added = newLines.filter((l: string) => !oldLines.has(l));
-      const removed = previousInstructions
-        .split("\n")
-        .map((l: string) => l.trim())
-        .filter((l: string) => l && !newLines.includes(l));
+      const newAllLines = [...newGeneric.split("\n"), ...newPage.split("\n")]
+        .map((l) => l.trim()).filter(Boolean);
+      const added = newAllLines.filter((l) => !oldAllLines.has(l));
+      const removed = [...genericInstructions.split("\n"), ...pageInstructions.split("\n")]
+        .map((l) => l.trim())
+        .filter((l) => l && !newAllLines.includes(l));
 
-      let diffSummary = `Updated instructions (${newLines.length} total).`;
+      const genericCount = newGeneric.split("\n").filter((l: string) => l.trim().startsWith("-")).length;
+      const pageCount = newPage.split("\n").filter((l: string) => l.trim().startsWith("-")).length;
+
+      let diffSummary = `Updated: ${genericCount} generic + ${pageCount} page-specific instructions.`;
       if (added.length > 0) {
         diffSummary += `\n\n[NEW]\n${added.join("\n")}`;
       }
@@ -332,13 +373,9 @@ export default function Home() {
 
       const updatedMessages: FeedbackMessage[] = [
         ...newMessages,
-        {
-          role: "assistant",
-          content: diffSummary,
-        },
+        { role: "assistant", content: diffSummary },
       ];
       setFeedbackMessages(updatedMessages);
-      saveInstructions(instructions, `feedback: ${message.slice(0, 50)}`);
     } catch {
       const errorMessages: FeedbackMessage[] = [
         ...newMessages,
@@ -363,10 +400,48 @@ export default function Home() {
     // They're also in localStorage keyed by URL
   };
 
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    if (!result) return;
+    setIsDownloading(true);
+    try {
+      const res = await fetch("/api/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modifiedHtml: result.modifiedHtml,
+          baseUrl: result.baseUrl,
+          pageTitle: result.pageTitle,
+        }),
+      });
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/)?.[1] || "geckocheck-export.zip";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const handleClearFeedback = () => {
-    setCustomInstructions("");
+    setGenericInstructions("");
+    setPageInstructions("");
     setFeedbackMessages([]);
-    saveInstructions("", "cleared all instructions");
+    saveInstructions("", "cleared page instructions");
+    fetch("/api/prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "setGenericInstructions", customInstructions: "", changeNote: "cleared generic instructions" }),
+    }).catch(() => {});
   };
 
   return (
@@ -464,21 +539,29 @@ export default function Home() {
             </span>
 
             <button
-              onClick={handleNewGeneration}
-              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 transition-all"
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 transition-all disabled:opacity-50"
             >
-              <svg
-                className="w-3.5 h-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
+              {isDownloading ? (
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              )}
+              {isDownloading ? "Zipping..." : "Download"}
+            </button>
+
+            <button
+              onClick={handleNewGeneration}
+              className="ml-1 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 transition-all"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
               New
             </button>

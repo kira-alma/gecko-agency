@@ -37,6 +37,13 @@ function getDb(): Database.Database {
 
       CREATE INDEX IF NOT EXISTS idx_page_prompt_url ON page_prompt_history(page_url);
 
+      CREATE TABLE IF NOT EXISTS generic_instructions_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        custom_instructions TEXT NOT NULL DEFAULT '',
+        change_note TEXT NOT NULL DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS page_instructions_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         page_url TEXT NOT NULL,
@@ -189,4 +196,21 @@ export function revertPageInstructions(pageUrl: string, versionId: number): stri
     return row.custom_instructions;
   }
   return null;
+}
+
+// --- Generic Instructions (versioned) ---
+
+export function getGenericInstructions(): string | null {
+  const row = getDb()
+    .prepare("SELECT custom_instructions FROM generic_instructions_history ORDER BY id DESC LIMIT 1")
+    .get() as { custom_instructions: string } | undefined;
+  return row?.custom_instructions || null;
+}
+
+export function setGenericInstructions(customInstructions: string, changeNote: string = ""): void {
+  const current = getGenericInstructions();
+  if (current === customInstructions) return;
+  getDb()
+    .prepare("INSERT INTO generic_instructions_history (custom_instructions, change_note) VALUES (?, ?)")
+    .run(customInstructions, changeNote);
 }

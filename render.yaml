@@ -5,8 +5,12 @@ services:
     plan: standard
     buildCommand: npm install && npx playwright install chromium --with-deps && npm run build
     startCommand: npm start
+    disk:
+      name: geckocheck-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
-      - key: ANTHROPIC_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
       - key: NODE_ENV
         value: production

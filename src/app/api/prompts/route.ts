@@ -3,6 +3,7 @@ import {
   getGenericPrompt, setGenericPrompt, getGenericPromptHistory, revertGenericPrompt,
   getPagePrompt, setPagePrompt, getPagePromptHistory, revertPagePrompt,
   getPageInstructions, setPageInstructions, getPageInstructionsHistory, revertPageInstructions,
+  getGenericInstructions, setGenericInstructions,
 } from "@/lib/db";
 
 // GET /api/prompts?pageUrl=...&history=true
@@ -20,9 +21,9 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     genericPrompt: getGenericPrompt(),
+    genericInstructions: getGenericInstructions(),
     pagePrompt: pageUrl ? getPagePrompt(pageUrl) : null,
     customInstructions: pageUrl ? getPageInstructions(pageUrl) : null,
-    // No chat messages — those are session-only
   });
 }
 
@@ -44,6 +45,10 @@ export async function POST(request: NextRequest) {
     case "setInstructions":
       if (!pageUrl) return NextResponse.json({ error: "pageUrl required" }, { status: 400 });
       setPageInstructions(pageUrl, customInstructions || "", changeNote || "feedback update");
+      return NextResponse.json({ ok: true });
+
+    case "setGenericInstructions":
+      setGenericInstructions(customInstructions || "", changeNote || "feedback update");
       return NextResponse.json({ ok: true });
 
     case "revertGenericPrompt":
