@@ -28,11 +28,30 @@ export async function POST(request: NextRequest) {
       customPagePrompt || undefined
     );
 
-    return NextResponse.json(result);
+    // Don't send userPrompt back — it contains full HTML and bloats the response
+    return NextResponse.json({
+      modifiedHtml: result.modifiedHtml,
+      changes: result.changes,
+      failedChanges: result.failedChanges,
+      systemPrompt: result.systemPrompt,
+      userPrompt: "", // omit to save memory
+      genericPrompt: result.genericPrompt,
+      pageSpecificPrompt: result.pageSpecificPrompt,
+    });
   } catch (error) {
-    console.error("Generation error:", error);
+    const msg = (error as Error).message || "Unknown error";
+    console.error("Generation error:", msg);
+
+    // Check for common issues
+    if (msg.includes("abort") || msg.includes("timeout")) {
+      return NextResponse.json(
+        { error: "The model timed out. Try a faster model or a smaller page." },
+        { status: 504 }
+      );
+    }
+
     return NextResponse.json(
-      { error: "Failed to generate: " + (error as Error).message },
+      { error: "Failed to generate: " + msg },
       { status: 500 }
     );
   }
