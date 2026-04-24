@@ -27,7 +27,7 @@ export async function scrapePage(url: string): Promise<ScrapedPage> {
   });
 
   try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     // Wait for the body to have meaningful content
     await page.waitForFunction(

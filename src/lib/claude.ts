@@ -17,6 +17,7 @@ export interface Change {
 export interface GenerationResult {
   modifiedHtml: string;
   changes: Change[];
+  failedChanges: Change[];
   systemPrompt: string;
   userPrompt: string;
   genericPrompt: string;
@@ -99,8 +100,12 @@ export async function callOpenRouter(
     throw new Error("OPENROUTER_API_KEY is not set");
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+
   const response = await fetch(OPENROUTER_API_URL, {
     method: "POST",
+    signal: controller.signal,
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
@@ -116,6 +121,8 @@ export async function callOpenRouter(
       ],
     }),
   });
+
+  clearTimeout(timeout);
 
   if (!response.ok) {
     const errorBody = await response.text();
@@ -160,6 +167,8 @@ export async function generateModifiedPage(
   customPagePrompt?: string
 ): Promise<GenerationResult> {
   const trimmedHtml = trimHtmlForLlm(originalHtml);
+
+  console.log(`HTML trimmed: ${originalHtml.length} → ${trimmedHtml.length} chars (${Math.round((1 - trimmedHtml.length / originalHtml.length) * 100)}% reduction)`);
 
   const genericPrompt = customGenericPrompt || GENERIC_SYSTEM_PROMPT;
   const pageSpecificPrompt = customPagePrompt || buildPageSpecificPrompt(pageUrl, brandGuidelines, customInstructions);
@@ -233,6 +242,7 @@ Execute ALL the GeckoCheck action items. For each change, provide detailed reaso
   // Apply changes to the original HTML using find-and-replace
   let modifiedHtml = originalHtml;
   const appliedChanges: Change[] = [];
+  const failedChanges: Change[] = [];
 
   function tagModified(modified: string, changeId: string): string {
     const tagMatch = modified.match(/^<(\w+)/);
@@ -311,7 +321,29 @@ Execute ALL the GeckoCheck action items. For each change, provide detailed reaso
       }
     } catch { /* ignore */ }
 
+    // Strategy 5: Strip ALL attributes from the snippet and try to match tag structure + text
+    try {
+      const stripAttrs = (s: string) => s.replace(/<(\w+)\s[^>]*>/g, "<$1>").replace(/\s+/g, " ").trim();
+      const strippedOriginal = stripAttrs(original);
+      if (strippedOriginal.length > 30) {
+        // Build a regex that matches the same tags with any attributes
+        const escaped = strippedOriginal
+          .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+          .replace(/<(\w+)>/g, "<$1[^>]*>")
+          .replace(/ /g, "\\s*");
+        const regex = new RegExp(escaped);
+        const match = modifiedHtml.match(regex);
+        if (match) {
+          modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
+          appliedChanges.push(change);
+          continue;
+        }
+      }
+    } catch { /* regex too complex */ }
+
     console.warn(`[${change.id}] No match found for: "${original.slice(0, 80)}..."`);
+    // Track as failed change
+    failedChanges.push(change);
   }
 
   console.log(`Applied ${appliedChanges.length}/${changes.length} changes`);
@@ -319,6 +351,7 @@ Execute ALL the GeckoCheck action items. For each change, provide detailed reaso
   return {
     modifiedHtml,
     changes: appliedChanges,
+    failedChanges,
     systemPrompt: analysisPrompt,
     userPrompt,
     genericPrompt,

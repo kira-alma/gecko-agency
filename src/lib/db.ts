@@ -53,6 +53,36 @@ function getDb(): Database.Database {
       );
 
       CREATE INDEX IF NOT EXISTS idx_page_instructions_url ON page_instructions_history(page_url);
+
+      CREATE TABLE IF NOT EXISTS runs (
+        id TEXT PRIMARY KEY,
+        page_url TEXT NOT NULL,
+        page_title TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        brand_guidelines TEXT NOT NULL DEFAULT '',
+        customer_queries TEXT NOT NULL DEFAULT '',
+        llm_links TEXT NOT NULL DEFAULT '',
+        llm_sources TEXT NOT NULL DEFAULT '',
+        llm_answers TEXT NOT NULL DEFAULT '',
+        llm_chain_of_thought TEXT NOT NULL DEFAULT '',
+        action_items TEXT NOT NULL DEFAULT '',
+        gecko_insights TEXT NOT NULL DEFAULT '',
+        system_prompt TEXT NOT NULL DEFAULT '',
+        user_prompt TEXT NOT NULL DEFAULT '',
+        generic_prompt TEXT NOT NULL DEFAULT '',
+        page_specific_prompt TEXT NOT NULL DEFAULT '',
+        changes_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_runs_page_url ON runs(page_url);
+
+      CREATE TABLE IF NOT EXISTS run_html (
+        run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+        original_html TEXT NOT NULL,
+        modified_html TEXT NOT NULL
+      );
     `);
 
     // Migrate data from old tables if they exist
@@ -213,4 +243,107 @@ export function setGenericInstructions(customInstructions: string, changeNote: s
   getDb()
     .prepare("INSERT INTO generic_instructions_history (custom_instructions, change_note) VALUES (?, ?)")
     .run(customInstructions, changeNote);
+}
+
+// --- Runs (full session persistence) ---
+
+export interface RunSummary {
+  id: string;
+  page_url: string;
+  page_title: string;
+  model: string;
+  created_at: string;
+  change_count: number;
+}
+
+export interface RunInput {
+  id: string;
+  pageUrl: string;
+  pageTitle: string;
+  model: string;
+  brandGuidelines: string;
+  customerQueries: string;
+  llmLinks: string;
+  llmSources: string;
+  llmAnswers: string;
+  llmChainOfThought: string;
+  actionItems: string;
+  geckoInsights: string;
+  systemPrompt: string;
+  userPrompt: string;
+  genericPrompt: string;
+  pageSpecificPrompt: string;
+  changesJson: string;
+  originalHtml: string;
+  modifiedHtml: string;
+}
+
+export function saveRun(run: RunInput): void {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO runs (id, page_url, page_title, model, brand_guidelines, customer_queries,
+        llm_links, llm_sources, llm_answers, llm_chain_of_thought, action_items,
+        gecko_insights, system_prompt, user_prompt, generic_prompt, page_specific_prompt, changes_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      run.id, run.pageUrl, run.pageTitle, run.model, run.brandGuidelines,
+      run.customerQueries, run.llmLinks, run.llmSources, run.llmAnswers,
+      run.llmChainOfThought, run.actionItems, run.geckoInsights,
+      run.systemPrompt, run.userPrompt, run.genericPrompt, run.pageSpecificPrompt,
+      run.changesJson
+    );
+    db.prepare(`
+      INSERT INTO run_html (run_id, original_html, modified_html) VALUES (?, ?, ?)
+    `).run(run.id, run.originalHtml, run.modifiedHtml);
+  });
+  tx();
+}
+
+export function listRuns(): RunSummary[] {
+  return getDb().prepare(`
+    SELECT id, page_url, page_title, model, created_at,
+      json_array_length(changes_json) as change_count
+    FROM runs ORDER BY created_at DESC LIMIT 50
+  `).all() as RunSummary[];
+}
+
+export function getRun(id: string): (RunInput & { created_at: string }) | null {
+  const row = getDb().prepare(`
+    SELECT r.*, h.original_html, h.modified_html
+    FROM runs r JOIN run_html h ON h.run_id = r.id
+    WHERE r.id = ?
+  `).get(id) as Record<string, string> | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    pageUrl: row.page_url,
+    pageTitle: row.page_title,
+    model: row.model,
+    brandGuidelines: row.brand_guidelines,
+    customerQueries: row.customer_queries,
+    llmLinks: row.llm_links,
+    llmSources: row.llm_sources,
+    llmAnswers: row.llm_answers,
+    llmChainOfThought: row.llm_chain_of_thought,
+    actionItems: row.action_items,
+    geckoInsights: row.gecko_insights,
+    systemPrompt: row.system_prompt,
+    userPrompt: row.user_prompt,
+    genericPrompt: row.generic_prompt,
+    pageSpecificPrompt: row.page_specific_prompt,
+    changesJson: row.changes_json,
+    originalHtml: row.original_html,
+    modifiedHtml: row.modified_html,
+    created_at: row.created_at,
+  };
+}
+
+export function deleteRun(id: string): void {
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM run_html WHERE run_id = ?").run(id);
+    db.prepare("DELETE FROM runs WHERE id = ?").run(id);
+  });
+  tx();
 }

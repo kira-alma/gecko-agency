@@ -12,15 +12,28 @@ import {
   DEFAULT_ACTION_ITEMS,
 } from "@/lib/defaults";
 
+export interface FormFields {
+  url: string;
+  brandGuidelines: string;
+  customerQueries: string;
+  llmLinks: string;
+  llmSources: string;
+  llmAnswers: string;
+  llmChainOfThought: string;
+  actionItems: string;
+}
+
 interface InputFormProps {
   onSubmit: (data: {
     url: string;
     brandGuidelines: string;
     geckoInsights: string;
     uploadedHtml?: string;
+    fields: FormFields;
   }) => void;
   isLoading: boolean;
   selectedModel: string;
+  initialValues?: FormFields;
 }
 
 interface CollapsibleSectionProps {
@@ -68,7 +81,7 @@ function CollapsibleSection({
   );
 }
 
-export default function InputForm({ onSubmit, isLoading, selectedModel }: InputFormProps) {
+export default function InputForm({ onSubmit, isLoading, selectedModel, initialValues }: InputFormProps) {
   const [inputMode, setInputMode] = useState<"url" | "upload">("url");
   const [uploadedHtml, setUploadedHtml] = useState<string>("");
   const [uploadedFileName, setUploadedFileName] = useState<string>("");
@@ -84,14 +97,14 @@ export default function InputForm({ onSubmit, isLoading, selectedModel }: InputF
     reader.readAsText(file);
   };
 
-  const [url, setUrl] = useState(DEFAULT_URL);
-  const [brandGuidelines, setBrandGuidelines] = useState(DEFAULT_BRAND_GUIDELINES);
-  const [customerQueries, setCustomerQueries] = useState(DEFAULT_CUSTOMER_QUERIES);
-  const [llmLinks, setLlmLinks] = useState(DEFAULT_LLM_LINKS);
-  const [llmSources, setLlmSources] = useState(DEFAULT_LLM_SOURCES);
-  const [llmAnswers, setLlmAnswers] = useState(DEFAULT_LLM_ANSWERS);
-  const [llmChainOfThought, setLlmChainOfThought] = useState(DEFAULT_LLM_CHAIN_OF_THOUGHT);
-  const [actionItems, setActionItems] = useState(DEFAULT_ACTION_ITEMS);
+  const [url, setUrl] = useState(initialValues?.url || DEFAULT_URL);
+  const [brandGuidelines, setBrandGuidelines] = useState(initialValues?.brandGuidelines || DEFAULT_BRAND_GUIDELINES);
+  const [customerQueries, setCustomerQueries] = useState(initialValues?.customerQueries || DEFAULT_CUSTOMER_QUERIES);
+  const [llmLinks, setLlmLinks] = useState(initialValues?.llmLinks || DEFAULT_LLM_LINKS);
+  const [llmSources, setLlmSources] = useState(initialValues?.llmSources || DEFAULT_LLM_SOURCES);
+  const [llmAnswers, setLlmAnswers] = useState(initialValues?.llmAnswers || DEFAULT_LLM_ANSWERS);
+  const [llmChainOfThought, setLlmChainOfThought] = useState(initialValues?.llmChainOfThought || DEFAULT_LLM_CHAIN_OF_THOUGHT);
+  const [actionItems, setActionItems] = useState(initialValues?.actionItems || DEFAULT_ACTION_ITEMS);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,6 +132,7 @@ ${actionItems}`;
       brandGuidelines,
       geckoInsights,
       uploadedHtml: inputMode === "upload" ? uploadedHtml : undefined,
+      fields: { url, brandGuidelines, customerQueries, llmLinks, llmSources, llmAnswers, llmChainOfThought, actionItems },
     });
   };
 

@@ -2,12 +2,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import InputForm from "@/components/InputForm";
+import type { FormFields } from "@/components/InputForm";
 import PageViewer from "@/components/PageViewer";
 import LoadingOverlay from "@/components/LoadingOverlay";
 import ExplanationReport from "@/components/ExplanationReport";
 import AdvancedPromptView from "@/components/AdvancedPromptView";
 import FeedbackChat from "@/components/FeedbackChat";
+import RunsList from "@/components/RunsList";
 import type { Change } from "@/lib/claude";
+import type { RunSummary } from "@/lib/db";
 import { GENERIC_SYSTEM_PROMPT, buildPageSpecificPrompt } from "@/lib/claude";
 
 interface ScrapedData {
@@ -21,6 +24,7 @@ interface ResultData {
   originalHtml: string;
   modifiedHtml: string;
   changes: Change[];
+  failedChanges: Change[];
   baseUrl: string;
   pageUrl: string;
   pageTitle: string;
@@ -45,6 +49,96 @@ export default function Home() {
     "scraping" | "generating" | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Runs persistence
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [loadedFormValues, setLoadedFormValues] = useState<FormFields | undefined>(undefined);
+
+  // Load runs list on mount
+  useEffect(() => {
+    fetch("/api/runs")
+      .then((r) => r.json())
+      .then((data) => { if (data.runs) setRuns(data.runs); })
+      .catch(() => {});
+  }, []);
+
+  const refreshRuns = () => {
+    fetch("/api/runs")
+      .then((r) => r.json())
+      .then((data) => { if (data.runs) setRuns(data.runs); })
+      .catch(() => {});
+  };
+
+  const loadRun = async (id: string) => {
+    try {
+      const res = await fetch(`/api/runs?id=${id}`);
+      if (!res.ok) throw new Error("Failed to load run");
+      const run = await res.json();
+
+      const changes: Change[] = JSON.parse(run.changesJson || "[]");
+      const baseUrl = (() => {
+        try { const u = new URL(run.pageUrl); return `${u.protocol}//${u.host}`; } catch { return ""; }
+      })();
+
+      setResult({
+        originalHtml: run.originalHtml,
+        modifiedHtml: run.modifiedHtml,
+        changes,
+        failedChanges: [],
+        baseUrl,
+        pageUrl: run.pageUrl,
+        pageTitle: run.pageTitle,
+        systemPrompt: run.systemPrompt,
+        userPrompt: run.userPrompt,
+        genericPrompt: run.genericPrompt,
+        pageSpecificPrompt: run.pageSpecificPrompt,
+      });
+
+      setLastInputs({
+        originalHtml: run.originalHtml,
+        pageUrl: run.pageUrl,
+        baseUrl,
+        pageTitle: run.pageTitle,
+        brandGuidelines: run.brandGuidelines,
+        geckoInsights: run.geckoInsights,
+        model: run.model,
+      });
+
+      setLoadedFormValues({
+        url: run.pageUrl,
+        brandGuidelines: run.brandGuidelines,
+        customerQueries: run.customerQueries,
+        llmLinks: run.llmLinks,
+        llmSources: run.llmSources,
+        llmAnswers: run.llmAnswers,
+        llmChainOfThought: run.llmChainOfThought,
+        actionItems: run.actionItems,
+      });
+
+      setSelectedModel(run.model);
+      setActiveRunId(id);
+      setShowResults(true);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const handleDeleteRun = async (id: string) => {
+    try {
+      await fetch("/api/runs", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      refreshRuns();
+      if (activeRunId === id) {
+        setActiveRunId(null);
+        setResult(null);
+        setShowResults(false);
+      }
+    } catch { /* ignore */ }
+  };
 
   // Model selection — shared between form and advanced tab
   const [selectedModel, setSelectedModel] = useState("openai/gpt-5");
@@ -163,6 +257,7 @@ export default function Home() {
     brandGuidelines: string;
     geckoInsights: string;
     uploadedHtml?: string;
+    fields: FormFields;
   }) => {
     setError(null);
     setResult(null);
@@ -234,6 +329,7 @@ export default function Home() {
         originalHtml: scraped.html,
         modifiedHtml: generated.modifiedHtml,
         changes: generated.changes,
+        failedChanges: generated.failedChanges || [],
         baseUrl: scraped.baseUrl,
         pageUrl: scraped.url,
         pageTitle: scraped.title,
@@ -243,8 +339,42 @@ export default function Home() {
         pageSpecificPrompt: generated.pageSpecificPrompt || "",
       });
       setShowResults(true);
+
+      // Save run to database
+      const runId = crypto.randomUUID();
+      setActiveRunId(runId);
+      fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: runId,
+          pageUrl: scraped.url,
+          pageTitle: scraped.title,
+          model: selectedModel,
+          brandGuidelines: data.fields.brandGuidelines,
+          customerQueries: data.fields.customerQueries,
+          llmLinks: data.fields.llmLinks,
+          llmSources: data.fields.llmSources,
+          llmAnswers: data.fields.llmAnswers,
+          llmChainOfThought: data.fields.llmChainOfThought,
+          actionItems: data.fields.actionItems,
+          geckoInsights: data.geckoInsights,
+          systemPrompt: generated.systemPrompt || "",
+          userPrompt: generated.userPrompt || "",
+          genericPrompt: generated.genericPrompt || "",
+          pageSpecificPrompt: generated.pageSpecificPrompt || "",
+          changesJson: JSON.stringify(generated.changes),
+          originalHtml: scraped.html,
+          modifiedHtml: generated.modifiedHtml,
+        }),
+      }).then(() => refreshRuns()).catch(console.error);
     } catch (err) {
-      setError((err as Error).message);
+      const msg = (err as Error).message;
+      if (msg === "Failed to fetch") {
+        setError("Request failed — the server may have timed out or the page is too large. Try using Upload HTML mode or a smaller page.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoadingStage(null);
     }
@@ -283,6 +413,7 @@ export default function Home() {
         originalHtml: lastInputs.originalHtml,
         modifiedHtml: generated.modifiedHtml,
         changes: generated.changes,
+        failedChanges: generated.failedChanges || [],
         baseUrl: lastInputs.baseUrl,
         pageUrl: lastInputs.pageUrl,
         pageTitle: lastInputs.pageTitle,
@@ -396,8 +527,8 @@ export default function Home() {
     setResult(null);
     setError(null);
     setShowResults(false);
-    // Keep customInstructions — they persist across generations
-    // They're also in localStorage keyed by URL
+    setActiveRunId(null);
+    setLoadedFormValues(undefined);
   };
 
   const [isDownloading, setIsDownloading] = useState(false);
@@ -699,7 +830,12 @@ ${result.changes.map((c, i) => {
             </div>
 
             <span className="text-xs text-gray-500 ml-3">
-              {result.changes.length} changes
+              {result.changes.length} applied
+              {result.failedChanges.length > 0 && (
+                <span className="text-red-400 ml-1">
+                  ({result.failedChanges.length} failed)
+                </span>
+              )}
             </span>
 
             <div className="relative ml-2">
@@ -763,6 +899,7 @@ ${result.changes.map((c, i) => {
               originalHtml={result.originalHtml}
               modifiedHtml={result.modifiedHtml}
               changes={result.changes}
+              failedChanges={result.failedChanges}
               baseUrl={result.baseUrl}
             />
           ) : activeTab === "report" ? (
@@ -886,6 +1023,27 @@ ${result.changes.map((c, i) => {
                   </p>
                 </div>
 
+                {/* Previous Runs */}
+                {runs.length > 0 && (
+                  <details className="mb-6 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+                    <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-gray-300 hover:text-white flex items-center gap-2">
+                      <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Previous Runs
+                      <span className="text-xs text-gray-500 ml-1">({runs.length})</span>
+                    </summary>
+                    <div className="px-3 pb-3 border-t border-gray-800 pt-2">
+                      <RunsList
+                        runs={runs}
+                        activeRunId={activeRunId}
+                        onSelect={loadRun}
+                        onDelete={handleDeleteRun}
+                      />
+                    </div>
+                  </details>
+                )}
+
                 {error && (
                   <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
                     <strong>Error:</strong> {error}
@@ -893,9 +1051,11 @@ ${result.changes.map((c, i) => {
                 )}
 
                 <InputForm
+                  key={activeRunId || "new"}
                   onSubmit={handleSubmit}
                   isLoading={loadingStage !== null}
                   selectedModel={selectedModel}
+                  initialValues={loadedFormValues}
                 />
               </div>
             </main>

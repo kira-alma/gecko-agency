@@ -7,6 +7,7 @@ interface PageViewerProps {
   originalHtml: string;
   modifiedHtml: string;
   changes: Change[];
+  failedChanges?: Change[];
   baseUrl: string;
 }
 
@@ -151,6 +152,7 @@ export default function PageViewer({
   originalHtml,
   modifiedHtml,
   changes,
+  failedChanges = [],
   baseUrl,
 }: PageViewerProps) {
   const [viewMode, setViewMode] = useState<"modified" | "original" | "split">(
@@ -344,6 +346,38 @@ export default function PageViewer({
               </div>
             );
           })}
+
+          {/* Failed changes */}
+          {failedChanges.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-red-500/20">
+              <div className="text-xs font-semibold text-red-400 mb-2 px-1">
+                {failedChanges.length} change{failedChanges.length > 1 ? "s" : ""} could not be applied
+              </div>
+              {failedChanges.map((change) => (
+                <div
+                  key={change.id}
+                  className="rounded-lg border border-red-500/20 bg-red-500/5 mb-2"
+                >
+                  <div className="p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <svg className="w-3.5 h-3.5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      <span className="text-sm font-medium text-red-300">
+                        {change.description}
+                      </span>
+                    </div>
+                    <p className="text-xs text-red-400/60 mt-1">
+                      Could not find matching element in the page HTML
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1 italic">
+                      {change.reasoning?.slice(0, 100)}...
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
