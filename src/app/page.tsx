@@ -114,6 +114,9 @@ export default function Home() {
         llmAnswers: run.llmAnswers,
         llmChainOfThought: run.llmChainOfThought,
         actionItems: run.actionItems,
+        mode: run.pageUrl === "(new page)" ? "create" : "optimize",
+        projectDescription: "",
+        designReferenceUrl: "",
       });
 
       setSelectedModel(run.model);
@@ -257,11 +260,116 @@ export default function Home() {
     brandGuidelines: string;
     geckoInsights: string;
     fields: FormFields;
+    mode: "optimize" | "create";
+    projectDescription: string;
+    designReferenceUrl: string;
   }) => {
     setError(null);
     setResult(null);
 
     try {
+      // CREATE MODE — generate a new page from scratch
+      if (data.mode === "create") {
+        // If design reference URL provided, scrape it first
+        let designReferenceHtml = "";
+        if (data.designReferenceUrl) {
+          setLoadingStage("scraping");
+          try {
+            const scrapeRes = await fetch("/api/scrape", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: data.designReferenceUrl }),
+            });
+            if (scrapeRes.ok) {
+              const scraped = await scrapeRes.json();
+              designReferenceHtml = scraped.html;
+            }
+          } catch { /* continue without design reference */ }
+        }
+
+        setLoadingStage("generating");
+
+        const createRes = await fetch("/api/create-page", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectDescription: data.projectDescription,
+            brandGuidelines: data.brandGuidelines,
+            geckoInsights: data.geckoInsights,
+            model: selectedModel,
+            customInstructions: customInstructions || undefined,
+            customGenericPrompt: editedGenericPrompt || undefined,
+            designReferenceUrl: data.designReferenceUrl || undefined,
+            designReferenceHtml: designReferenceHtml || undefined,
+          }),
+        });
+
+        if (!createRes.ok) {
+          const text = await createRes.text();
+          try { const err = JSON.parse(text); throw new Error(err.error || "Failed to create page"); }
+          catch { throw new Error(`Page creation failed (${createRes.status}).`); }
+        }
+
+        const generated = await createRes.json();
+
+        setLastInputs({
+          originalHtml: "",
+          pageUrl: "",
+          baseUrl: "",
+          pageTitle: generated.title || "New Page",
+          brandGuidelines: data.brandGuidelines,
+          geckoInsights: data.geckoInsights,
+          model: selectedModel,
+        });
+
+        setResult({
+          originalHtml: "",
+          modifiedHtml: generated.modifiedHtml,
+          changes: generated.changes,
+          failedChanges: generated.failedChanges || [],
+          baseUrl: "",
+          pageUrl: "",
+          pageTitle: generated.title || "New Page",
+          systemPrompt: generated.systemPrompt || "",
+          userPrompt: generated.userPrompt || "",
+          genericPrompt: generated.genericPrompt || "",
+          pageSpecificPrompt: generated.pageSpecificPrompt || "",
+        });
+        setShowResults(true);
+
+        // Save run
+        const runId = crypto.randomUUID();
+        setActiveRunId(runId);
+        fetch("/api/runs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: runId,
+            pageUrl: "(new page)",
+            pageTitle: generated.title || "New Page",
+            model: selectedModel,
+            brandGuidelines: data.fields.brandGuidelines,
+            customerQueries: data.fields.customerQueries,
+            llmLinks: data.fields.llmLinks,
+            llmSources: data.fields.llmSources,
+            llmAnswers: data.fields.llmAnswers,
+            llmChainOfThought: data.fields.llmChainOfThought,
+            actionItems: data.fields.actionItems,
+            geckoInsights: data.geckoInsights,
+            systemPrompt: generated.systemPrompt || "",
+            userPrompt: "",
+            genericPrompt: generated.genericPrompt || "",
+            pageSpecificPrompt: generated.pageSpecificPrompt || "",
+            changesJson: JSON.stringify(generated.changes),
+            originalHtml: "",
+            modifiedHtml: generated.modifiedHtml,
+          }),
+        }).then(() => refreshRuns()).catch(console.error);
+
+        return;
+      }
+
+      // OPTIMIZE MODE — scrape existing page then generate changes
       let scraped: ScrapedData;
 
       {

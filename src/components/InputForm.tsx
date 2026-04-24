@@ -21,6 +21,9 @@ export interface FormFields {
   llmAnswers: string;
   llmChainOfThought: string;
   actionItems: string;
+  mode: "optimize" | "create";
+  projectDescription: string;
+  designReferenceUrl: string;
 }
 
 interface InputFormProps {
@@ -29,6 +32,9 @@ interface InputFormProps {
     brandGuidelines: string;
     geckoInsights: string;
     fields: FormFields;
+    mode: "optimize" | "create";
+    projectDescription: string;
+    designReferenceUrl: string;
   }) => void;
   isLoading: boolean;
   selectedModel: string;
@@ -81,6 +87,9 @@ function CollapsibleSection({
 }
 
 export default function InputForm({ onSubmit, isLoading, selectedModel, initialValues }: InputFormProps) {
+  const [mode, setMode] = useState<"optimize" | "create">(initialValues?.mode || "optimize");
+  const [projectDescription, setProjectDescription] = useState(initialValues?.projectDescription || "");
+  const [designReferenceUrl, setDesignReferenceUrl] = useState(initialValues?.designReferenceUrl || "");
   const [url, setUrl] = useState(initialValues?.url || DEFAULT_URL);
   const [brandGuidelines, setBrandGuidelines] = useState(initialValues?.brandGuidelines || DEFAULT_BRAND_GUIDELINES);
   const [customerQueries, setCustomerQueries] = useState(initialValues?.customerQueries || DEFAULT_CUSTOMER_QUERIES);
@@ -112,33 +121,99 @@ ${llmChainOfThought}
 ${actionItems}`;
 
     onSubmit({
-      url,
+      url: mode === "create" ? "" : url,
       brandGuidelines,
       geckoInsights,
-      fields: { url, brandGuidelines, customerQueries, llmLinks, llmSources, llmAnswers, llmChainOfThought, actionItems },
+      mode,
+      projectDescription,
+      designReferenceUrl: mode === "create" ? designReferenceUrl : "",
+      fields: { url: mode === "create" ? "" : url, brandGuidelines, customerQueries, llmLinks, llmSources, llmAnswers, llmChainOfThought, actionItems, mode, projectDescription, designReferenceUrl: mode === "create" ? designReferenceUrl : "" },
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* URL Input */}
-      <div>
-        <label
-          htmlFor="url"
-          className="block text-sm font-semibold text-gray-200 mb-2"
+      {/* Mode Toggle */}
+      <div className="flex gap-1 bg-gray-800 rounded-lg p-1 mb-1">
+        <button
+          type="button"
+          onClick={() => setMode("optimize")}
+          className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            mode === "optimize" ? "bg-emerald-600 text-white" : "text-gray-400 hover:text-white"
+          }`}
         >
-          Retailer Page URL
-        </label>
-        <input
-          id="url"
-          type="url"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://www.retailer.com/product/example"
-          required
-          className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-        />
+          Optimize Existing Page
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("create")}
+          className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+            mode === "create" ? "bg-emerald-600 text-white" : "text-gray-400 hover:text-white"
+          }`}
+        >
+          Create New Page
+        </button>
       </div>
+
+      {mode === "optimize" ? (
+        <div>
+          <label
+            htmlFor="url"
+            className="block text-sm font-semibold text-gray-200 mb-2"
+          >
+            Retailer Page URL
+          </label>
+          <input
+            id="url"
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://www.retailer.com/product/example"
+            required
+            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+          />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div>
+            <label
+              htmlFor="project-description"
+              className="block text-sm font-semibold text-gray-200 mb-2"
+            >
+              Project Description
+            </label>
+            <textarea
+              id="project-description"
+              value={projectDescription}
+              onChange={(e) => setProjectDescription(e.target.value)}
+              placeholder="Describe the page you want to create. E.g.: A landing page for SodaStream CO2 cylinder exchange program that compares pricing options (online exchange, subscription, in-store) and helps customers find the right cylinder type for their machine..."
+              rows={5}
+              required
+              className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all resize-y text-sm"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="design-ref"
+              className="block text-sm font-semibold text-gray-200 mb-1"
+            >
+              Design Reference URL
+              <span className="text-gray-500 font-normal ml-1">(optional)</span>
+            </label>
+            <p className="text-xs text-gray-500 mb-2">
+              The new page will match the look and feel of this URL
+            </p>
+            <input
+              id="design-ref"
+              type="url"
+              value={designReferenceUrl}
+              onChange={(e) => setDesignReferenceUrl(e.target.value)}
+              placeholder="https://www.example.com/page-to-copy-design-from"
+              className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-sm"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Brand Guidelines */}
       <div>
@@ -257,7 +332,7 @@ ${actionItems}`;
       {/* Submit */}
       <button
         type="submit"
-        disabled={isLoading || !url || !customerQueries || !actionItems}
+        disabled={isLoading || (mode === "optimize" && !url) || (mode === "create" && !projectDescription) || !actionItems}
         className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-lg transition-all duration-200 flex items-center justify-center gap-3 text-lg cursor-pointer disabled:cursor-not-allowed"
       >
         {isLoading ? (
@@ -298,7 +373,7 @@ ${actionItems}`;
                 d="M13 10V3L4 14h7v7l9-11h-7z"
               />
             </svg>
-            Generate Optimized Page
+            {mode === "create" ? "Generate New Page" : "Generate Optimized Page"}
           </>
         )}
       </button>

@@ -28,13 +28,16 @@ export async function POST(request: NextRequest) {
       customPagePrompt || undefined
     );
 
-    // Don't send userPrompt back — it contains full HTML and bloats the response
+    // Return user prompt but replace the huge HTML section with a placeholder
+    const trimmedUserPrompt = result.userPrompt
+      .replace(/=== PAGE HTML ===[\s\S]*?(?==== |$)/, "=== PAGE HTML ===\n[HTML content omitted — too large to display]\n\n");
+
     return NextResponse.json({
       modifiedHtml: result.modifiedHtml,
       changes: result.changes,
       failedChanges: result.failedChanges,
       systemPrompt: result.systemPrompt,
-      userPrompt: "", // omit to save memory
+      userPrompt: trimmedUserPrompt,
       genericPrompt: result.genericPrompt,
       pageSpecificPrompt: result.pageSpecificPrompt,
     });

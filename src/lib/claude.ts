@@ -24,8 +24,13 @@ export interface GenerationResult {
   pageSpecificPrompt: string;
 }
 
-// The generic system prompt — same for every page
-export const GENERIC_SYSTEM_PROMPT = `You are GeckoCheck's page optimization engine. You receive a retailer product page along with rich data about how AI assistants (GPT, Gemini, etc.) answer customer questions about this product category. Your job is to modify the page so that AI assistants will find, understand, and recommend this page's products.
+// The generic system prompt — same for every page, handles both optimize and create modes
+export const GENERIC_SYSTEM_PROMPT = `You are GeckoCheck's page optimization engine. You work in two modes:
+
+MODE 1 — OPTIMIZE: You receive an existing retailer page's HTML and modify it based on insights.
+MODE 2 — CREATE: You receive a project description and create a brand new HTML page from scratch.
+
+The user prompt will specify which mode to use.
 
 CONTEXT ON THE INSIGHTS YOU RECEIVE:
 - "Customer Queries": Real questions users are asking AI assistants (e.g. "cheapest SodaStream CO2 refill"). These reveal what information the page MUST contain to be surfaced by AI search.
@@ -36,23 +41,19 @@ CONTEXT ON THE INSIGHTS YOU RECEIVE:
 - "GeckoCheck Action Items": Specific changes that GeckoCheck's analysis recommends. Execute ALL of these.
 
 RULES:
-1. Only modify content elements (text, headings, descriptions, bullet points, meta tags, structured data, adding new sections)
-2. Every change MUST be deeply connected to specific insights. In your reasoning, QUOTE the specific customer query, LLM answer excerpt, competitor link, or chain-of-thought search term that drives the change.
-3. BRAND GUIDELINES COMPLIANCE IS MANDATORY. Every piece of new or modified copy must:
+1. Every change/section MUST be deeply connected to specific insights. In your reasoning, QUOTE the specific customer query, LLM answer excerpt, competitor link, or chain-of-thought search term that drives the change.
+2. BRAND GUIDELINES COMPLIANCE IS MANDATORY. Every piece of copy must:
    - Use the brand's exact terminology (e.g. "sparkling water makers" not "soda machines", "CO2 cylinders" not "gas tanks")
    - Match the brand's tone (e.g. if guidelines say "clean, modern, upbeat, simple" — no fear-based or aggressive language)
    - Follow the brand's capitalization rules exactly (e.g. "SodaStream" not "Sodastream" or "SODASTREAM")
-   - NOT make claims the brand hasn't published (e.g. if guidelines say "avoid inventing environmental claims" — don't add new sustainability claims)
-   - Use the brand's preferred framing (e.g. if they frame around "personalization" and "sustainability", weave those themes into new content)
-4. Be precise about which elements to change — use enough surrounding context to identify them uniquely
-5. For "reasoning": Write 3-5 sentences explaining:
-   a) The INSIGHT that triggered this (quote the customer query, LLM answer, competitor URL, or chain-of-thought term)
-   b) WHY this change addresses that insight (what gap it fills, what question it answers)
-   c) HOW it aligns with brand guidelines (which specific brand rule or terminology was applied)
-6. For "sourceInsight": Quote the EXACT text from the insights that triggered this change. For example: "Customer query: 'Where is the most cost-effective place to buy a gas cylinder'" or "LLM answer cited SimpliSoda at $13.99 but did not mention SodaStream's $16.99 exchange" or "Action item: Create a cost-first brief..."
-7. For "brandAlignment": Explain which brand guideline rule was followed in crafting this change.
+   - NOT make claims the brand hasn't published
+   - Use the brand's preferred framing
+3. For "reasoning": Write 3-5 sentences explaining: (a) which insight triggered this, (b) what gap it fills, (c) how it aligns with brand guidelines.
+4. For "sourceInsight": Quote the EXACT text from the insights that triggered this change.
+5. For "brandAlignment": Explain which brand guideline rule was followed.
 
-Respond with a JSON array of changes:
+=== OPTIMIZE MODE OUTPUT FORMAT ===
+When optimizing an existing page, respond with a JSON array of changes:
 [
   {
     "id": "change-1",
@@ -60,14 +61,34 @@ Respond with a JSON array of changes:
     "originalSnippet": "exact original text/HTML to find and replace",
     "modifiedSnippet": "the new text/HTML to replace it with",
     "description": "Short description of what was changed",
-    "reasoning": "3-5 sentence explanation: (a) which insight triggered this, (b) what gap it fills, (c) how it aligns with brand guidelines",
-    "sourceInsight": "Direct quote from the insights that triggered this change",
-    "brandAlignment": "Which brand guideline rule was followed (e.g. 'Used SodaStream capitalization exactly; kept tone clean/modern/upbeat per guidelines; used approved term CO2 cylinders instead of gas tanks')",
+    "reasoning": "3-5 sentence explanation",
+    "sourceInsight": "Direct quote from insights",
+    "brandAlignment": "Which brand guideline rule was followed",
     "category": "content|seo|structure|branding"
   }
 ]
+IMPORTANT: originalSnippet must be an EXACT substring of the HTML. Include enough context to be unique.
 
-IMPORTANT: originalSnippet must be an EXACT substring of the HTML so we can do find-and-replace. Include enough context to be unique. Do NOT include data-gecko-change attributes in originalSnippet.`;
+=== CREATE MODE OUTPUT FORMAT ===
+When creating a new page, respond with JSON:
+{
+  "html": "complete HTML page (<!DOCTYPE html>...</html>) with inline CSS, responsive design, structured data",
+  "title": "page title",
+  "changes": [
+    {
+      "id": "section-1",
+      "selector": "description of the section",
+      "originalSnippet": "",
+      "modifiedSnippet": "brief description of section content",
+      "description": "What this section does",
+      "reasoning": "Why this section was created — reference specific insights",
+      "sourceInsight": "The insight that drove this section",
+      "brandAlignment": "How it aligns with brand guidelines",
+      "category": "content|seo|structure|branding"
+    }
+  ]
+}
+For create mode: build a complete, modern, responsive HTML page with inline <style>. Include FAQ sections from customer queries, comparison tables where relevant, JSON-LD structured data, and clear CTAs.`;
 
 /** Build the page-specific portion of the prompt */
 export function buildPageSpecificPrompt(
@@ -174,7 +195,9 @@ export async function generateModifiedPage(
   const pageSpecificPrompt = customPagePrompt || buildPageSpecificPrompt(pageUrl, brandGuidelines, customInstructions);
   const analysisPrompt = genericPrompt + "\n" + pageSpecificPrompt;
 
-  const userPrompt = `URL: ${pageUrl}
+  const userPrompt = `MODE: OPTIMIZE — Modify the existing page HTML.
+
+URL: ${pageUrl}
 
 === PAGE HTML ===
 ${trimmedHtml}
@@ -185,7 +208,7 @@ ${brandGuidelines}
 === GECKOCHECK INSIGHTS ===
 ${geckoInsights}
 
-Execute ALL the GeckoCheck action items. For each change, provide detailed reasoning that directly references the specific insights (customer queries, LLM answers, competitor data, chain-of-thought terms) that justify it. A reader of the report should understand exactly WHY each change was made and WHAT data from the insights drove it.`;
+Execute ALL the GeckoCheck action items. Respond with the OPTIMIZE MODE JSON format (array of changes). For each change, provide detailed reasoning that directly references the specific insights.`;
 
   const text = await callOpenRouter(analysisPrompt, userPrompt, model);
 

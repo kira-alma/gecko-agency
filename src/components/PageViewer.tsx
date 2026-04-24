@@ -203,9 +203,12 @@ export default function PageViewer({
             </span>
           </div>
 
-          {/* View Toggle */}
+          {/* View Toggle — hide Original/Split if no original HTML */}
           <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
-            {(["modified", "original", "split"] as const).map((mode) => (
+            {(originalHtml
+              ? (["modified", "original", "split"] as const)
+              : (["modified"] as const)
+            ).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
@@ -216,7 +219,7 @@ export default function PageViewer({
                 }`}
               >
                 {mode === "modified"
-                  ? "Modified"
+                  ? (originalHtml ? "Modified" : "Generated Page")
                   : mode === "original"
                     ? "Original"
                     : "Split"}
