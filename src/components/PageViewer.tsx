@@ -23,39 +23,16 @@ function rewriteAssets(html: string, baseUrl: string): string {
     result = result.replace(/<head\b[^>]*>/, (m) => `${m}<base href="${baseUrl}/">`);
   }
 
-  // Remove common popup/modal/cookie banner elements
-  // By ID
-  result = result.replace(/<[^>]+id=["'](?:cookie[_-]?(?:banner|consent|notice|popup|modal|bar)|gdpr|onetrust|consent[_-]?(?:banner|modal|popup)|newsletter[_-]?(?:popup|modal)|popup[_-]?(?:overlay|modal)|modal[_-]?(?:overlay|backdrop))[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi, "");
-
-  // By class
-  result = result.replace(/<[^>]+class=["'][^"']*(?:cookie[_-]?(?:banner|consent|notice|popup|modal|bar)|gdpr|consent[_-]?(?:banner|modal)|newsletter[_-]?popup|popup[_-]?overlay|modal[_-]?(?:overlay|backdrop))[^"']*["'][^>]*>[\s\S]*?<\/[^>]+>/gi, "");
-
-  // Inject CSS to hide any remaining popups, modals, overlays, and fixed/sticky elements that block content
+  // Inject CSS to hide cookie/consent popups only — be precise to avoid hiding content
   const popupKillCss = `
     <style>
-      /* Kill popups, modals, cookie banners, overlays */
-      [class*="cookie"], [class*="Cookie"],
-      [class*="consent"], [class*="Consent"],
-      [class*="gdpr"], [class*="GDPR"],
-      [class*="newsletter-popup"], [class*="newsletter-modal"],
-      [class*="popup-overlay"], [class*="modal-overlay"],
-      [class*="overlay"][class*="modal"],
-      [id*="cookie"], [id*="Cookie"],
-      [id*="consent"], [id*="Consent"],
-      [id*="gdpr"], [id*="onetrust"],
-      [id*="newsletter-popup"], [id*="popup-overlay"],
-      [aria-modal="true"],
-      [role="dialog"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-      }
-      /* Remove fixed/sticky overlays that block scrolling */
-      body > div[style*="position: fixed"],
-      body > div[style*="position:fixed"],
-      body > div[style*="z-index: 9"],
-      body > div[style*="z-index:9"] {
+      /* Kill cookie/consent banners only */
+      [id*="cookie-banner"], [id*="cookie-consent"], [id*="cookie-notice"],
+      [id*="consent-banner"], [id*="consent-modal"],
+      [id*="onetrust"], [id*="gdpr"],
+      [class*="cookie-banner"], [class*="cookie-consent"],
+      [class*="consent-banner"], [class*="consent-modal"],
+      [class*="gdpr-banner"] {
         display: none !important;
       }
       /* Ensure body is scrollable */
