@@ -56,6 +56,7 @@ function getDb(): Database.Database {
 
       CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL DEFAULT '',
         page_url TEXT NOT NULL,
         page_title TEXT NOT NULL DEFAULT '',
         model TEXT NOT NULL DEFAULT '',
@@ -67,6 +68,8 @@ function getDb(): Database.Database {
         llm_chain_of_thought TEXT NOT NULL DEFAULT '',
         action_items TEXT NOT NULL DEFAULT '',
         gecko_insights TEXT NOT NULL DEFAULT '',
+        project_description TEXT NOT NULL DEFAULT '',
+        design_reference_url TEXT NOT NULL DEFAULT '',
         system_prompt TEXT NOT NULL DEFAULT '',
         user_prompt TEXT NOT NULL DEFAULT '',
         generic_prompt TEXT NOT NULL DEFAULT '',
@@ -115,6 +118,11 @@ function getDb(): Database.Database {
         }
       }
     } catch { /* old table doesn't exist */ }
+
+    // Add new columns to runs table if they don't exist
+    try { db.prepare("ALTER TABLE runs ADD COLUMN display_name TEXT NOT NULL DEFAULT ''").run(); } catch { /* already exists */ }
+    try { db.prepare("ALTER TABLE runs ADD COLUMN project_description TEXT NOT NULL DEFAULT ''").run(); } catch { /* already exists */ }
+    try { db.prepare("ALTER TABLE runs ADD COLUMN design_reference_url TEXT NOT NULL DEFAULT ''").run(); } catch { /* already exists */ }
   }
   return db;
 }
@@ -249,6 +257,7 @@ export function setGenericInstructions(customInstructions: string, changeNote: s
 
 export interface RunSummary {
   id: string;
+  display_name: string;
   page_url: string;
   page_title: string;
   model: string;
@@ -258,6 +267,7 @@ export interface RunSummary {
 
 export interface RunInput {
   id: string;
+  displayName?: string;
   pageUrl: string;
   pageTitle: string;
   model: string;
@@ -269,6 +279,8 @@ export interface RunInput {
   llmChainOfThought: string;
   actionItems: string;
   geckoInsights: string;
+  projectDescription?: string;
+  designReferenceUrl?: string;
   systemPrompt: string;
   userPrompt: string;
   genericPrompt: string;
@@ -282,14 +294,15 @@ export function saveRun(run: RunInput): void {
   const db = getDb();
   const tx = db.transaction(() => {
     db.prepare(`
-      INSERT INTO runs (id, page_url, page_title, model, brand_guidelines, customer_queries,
+      INSERT INTO runs (id, display_name, page_url, page_title, model, brand_guidelines, customer_queries,
         llm_links, llm_sources, llm_answers, llm_chain_of_thought, action_items,
-        gecko_insights, system_prompt, user_prompt, generic_prompt, page_specific_prompt, changes_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        gecko_insights, project_description, design_reference_url, system_prompt, user_prompt, generic_prompt, page_specific_prompt, changes_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      run.id, run.pageUrl, run.pageTitle, run.model, run.brandGuidelines,
+      run.id, run.displayName || "", run.pageUrl, run.pageTitle, run.model, run.brandGuidelines,
       run.customerQueries, run.llmLinks, run.llmSources, run.llmAnswers,
       run.llmChainOfThought, run.actionItems, run.geckoInsights,
+      run.projectDescription || "", run.designReferenceUrl || "",
       run.systemPrompt, run.userPrompt, run.genericPrompt, run.pageSpecificPrompt,
       run.changesJson
     );
@@ -302,10 +315,14 @@ export function saveRun(run: RunInput): void {
 
 export function listRuns(): RunSummary[] {
   return getDb().prepare(`
-    SELECT id, page_url, page_title, model, created_at,
+    SELECT id, display_name, page_url, page_title, model, created_at,
       json_array_length(changes_json) as change_count
     FROM runs ORDER BY created_at DESC LIMIT 50
   `).all() as RunSummary[];
+}
+
+export function renameRun(id: string, displayName: string): void {
+  getDb().prepare("UPDATE runs SET display_name = ? WHERE id = ?").run(displayName, id);
 }
 
 export function getRun(id: string): (RunInput & { created_at: string }) | null {
@@ -328,6 +345,8 @@ export function getRun(id: string): (RunInput & { created_at: string }) | null {
     llmChainOfThought: row.llm_chain_of_thought,
     actionItems: row.action_items,
     geckoInsights: row.gecko_insights,
+    projectDescription: row.project_description || "",
+    designReferenceUrl: row.design_reference_url || "",
     systemPrompt: row.system_prompt,
     userPrompt: row.user_prompt,
     genericPrompt: row.generic_prompt,

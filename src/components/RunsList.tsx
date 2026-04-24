@@ -8,10 +8,11 @@ interface RunsListProps {
   activeRunId: string | null;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, name: string) => void;
 }
 
 function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr + "Z"); // SQLite stores UTC without Z
+  const date = new Date(dateStr + "Z");
   const now = new Date();
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
   if (seconds < 60) return "just now";
@@ -24,9 +25,11 @@ function timeAgo(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-export default function RunsList({ runs, activeRunId, onSelect, onDelete }: RunsListProps) {
+export default function RunsList({ runs, activeRunId, onSelect, onDelete, onRename }: RunsListProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   if (runs.length === 0) {
     return (
@@ -40,12 +43,24 @@ export default function RunsList({ runs, activeRunId, onSelect, onDelete }: Runs
     ? runs.filter((r) => {
         const q = search.toLowerCase();
         return (
+          (r.display_name || "").toLowerCase().includes(q) ||
           r.page_title.toLowerCase().includes(q) ||
           r.page_url.toLowerCase().includes(q) ||
           r.model.toLowerCase().includes(q)
         );
       })
     : runs;
+
+  const handleStartRename = (e: React.MouseEvent, run: RunSummary) => {
+    e.stopPropagation();
+    setEditingId(run.id);
+    setEditName(run.display_name || run.page_title || "");
+  };
+
+  const handleSaveRename = (id: string) => {
+    onRename(id, editName.trim());
+    setEditingId(null);
+  };
 
   return (
     <div className="space-y-2">
@@ -67,7 +82,7 @@ export default function RunsList({ runs, activeRunId, onSelect, onDelete }: Runs
       {filtered.map((run) => (
         <div
           key={run.id}
-          onClick={() => onSelect(run.id)}
+          onClick={() => editingId !== run.id && onSelect(run.id)}
           className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all group ${
             activeRunId === run.id
               ? "bg-emerald-500/10 border border-emerald-500/30"
@@ -75,9 +90,40 @@ export default function RunsList({ runs, activeRunId, onSelect, onDelete }: Runs
           }`}
         >
           <div className="flex-1 min-w-0">
-            <div className="text-sm text-white font-medium truncate">
-              {run.page_title || run.page_url}
-            </div>
+            {editingId === run.id ? (
+              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveRename(run.id);
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  autoFocus
+                  className="flex-1 px-2 py-0.5 bg-gray-800 border border-emerald-500 rounded text-sm text-white focus:outline-none"
+                />
+                <button
+                  onClick={() => handleSaveRename(run.id)}
+                  className="px-2 py-0.5 bg-emerald-600 text-white text-xs rounded"
+                >
+                  Save
+                </button>
+              </div>
+            ) : (
+              <div className="text-sm text-white font-medium truncate flex items-center gap-1.5">
+                {run.display_name || run.page_title || run.page_url}
+                <button
+                  onClick={(e) => handleStartRename(e, run)}
+                  className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-gray-300 transition-all shrink-0"
+                  title="Rename"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-xs text-gray-500">{timeAgo(run.created_at)}</span>
               <span className="text-xs text-gray-600">|</span>

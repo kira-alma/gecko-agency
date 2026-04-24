@@ -105,8 +105,9 @@ export default function Home() {
         model: run.model,
       });
 
+      const isCreateMode = run.pageUrl === "(new page)" || !!run.projectDescription;
       setLoadedFormValues({
-        url: run.pageUrl,
+        url: run.pageUrl === "(new page)" ? "" : run.pageUrl,
         brandGuidelines: run.brandGuidelines,
         customerQueries: run.customerQueries,
         llmLinks: run.llmLinks,
@@ -114,9 +115,9 @@ export default function Home() {
         llmAnswers: run.llmAnswers,
         llmChainOfThought: run.llmChainOfThought,
         actionItems: run.actionItems,
-        mode: run.pageUrl === "(new page)" ? "create" : "optimize",
-        projectDescription: "",
-        designReferenceUrl: "",
+        mode: isCreateMode ? "create" : "optimize",
+        projectDescription: run.projectDescription || "",
+        designReferenceUrl: run.designReferenceUrl || "",
       });
 
       setSelectedModel(run.model);
@@ -140,6 +141,17 @@ export default function Home() {
         setResult(null);
         setShowResults(false);
       }
+    } catch { /* ignore */ }
+  };
+
+  const handleRenameRun = async (id: string, displayName: string) => {
+    try {
+      await fetch("/api/runs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, displayName }),
+      });
+      refreshRuns();
     } catch { /* ignore */ }
   };
 
@@ -356,6 +368,8 @@ export default function Home() {
             llmChainOfThought: data.fields.llmChainOfThought,
             actionItems: data.fields.actionItems,
             geckoInsights: data.geckoInsights,
+            projectDescription: data.projectDescription,
+            designReferenceUrl: data.designReferenceUrl,
             systemPrompt: generated.systemPrompt || "",
             userPrompt: "",
             genericPrompt: generated.genericPrompt || "",
@@ -1139,6 +1153,7 @@ ${result.changes.map((c, i) => {
                         activeRunId={activeRunId}
                         onSelect={loadRun}
                         onDelete={handleDeleteRun}
+                        onRename={handleRenameRun}
                       />
                     </div>
                   </details>
