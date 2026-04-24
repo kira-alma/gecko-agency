@@ -283,8 +283,9 @@ export default function Home() {
         });
 
         if (!scrapeRes.ok) {
-          const err = await scrapeRes.json();
-          throw new Error(err.error || "Failed to scrape page");
+          const text = await scrapeRes.text();
+          try { const err = JSON.parse(text); throw new Error(err.error || "Failed to scrape page"); }
+          catch { throw new Error(`Scrape failed (${scrapeRes.status}). The server may be out of memory. Try Upload HTML mode instead.`); }
         }
 
         scraped = await scrapeRes.json();
@@ -319,8 +320,9 @@ export default function Home() {
       });
 
       if (!generateRes.ok) {
-        const err = await generateRes.json();
-        throw new Error(err.error || "Failed to generate modifications");
+        const text = await generateRes.text();
+        try { const err = JSON.parse(text); throw new Error(err.error || "Failed to generate"); }
+        catch { throw new Error(`Generation failed (${generateRes.status}). The server may be out of memory or the model timed out.`); }
       }
 
       const generated = await generateRes.json();
