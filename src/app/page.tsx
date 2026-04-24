@@ -256,7 +256,6 @@ export default function Home() {
     url: string;
     brandGuidelines: string;
     geckoInsights: string;
-    uploadedHtml?: string;
     fields: FormFields;
   }) => {
     setError(null);
@@ -265,16 +264,7 @@ export default function Home() {
     try {
       let scraped: ScrapedData;
 
-      if (data.uploadedHtml) {
-        setLoadingStage("scraping");
-        const parsed = data.url ? new URL(data.url) : null;
-        scraped = {
-          html: data.uploadedHtml,
-          title: data.url || "Uploaded Page",
-          url: data.url || "",
-          baseUrl: parsed ? `${parsed.protocol}//${parsed.host}` : "",
-        };
-      } else {
+      {
         setLoadingStage("scraping");
         const scrapeRes = await fetch("/api/scrape", {
           method: "POST",
@@ -285,7 +275,7 @@ export default function Home() {
         if (!scrapeRes.ok) {
           const text = await scrapeRes.text();
           try { const err = JSON.parse(text); throw new Error(err.error || "Failed to scrape page"); }
-          catch { throw new Error(`Scrape failed (${scrapeRes.status}). The server may be out of memory. Try Upload HTML mode instead.`); }
+          catch { throw new Error(`Scrape failed (${scrapeRes.status}). The server may be out of memory or the page took too long to load.`); }
         }
 
         scraped = await scrapeRes.json();

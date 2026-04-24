@@ -28,7 +28,6 @@ interface InputFormProps {
     url: string;
     brandGuidelines: string;
     geckoInsights: string;
-    uploadedHtml?: string;
     fields: FormFields;
   }) => void;
   isLoading: boolean;
@@ -82,21 +81,6 @@ function CollapsibleSection({
 }
 
 export default function InputForm({ onSubmit, isLoading, selectedModel, initialValues }: InputFormProps) {
-  const [inputMode, setInputMode] = useState<"url" | "upload">("url");
-  const [uploadedHtml, setUploadedHtml] = useState<string>("");
-  const [uploadedFileName, setUploadedFileName] = useState<string>("");
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadedFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setUploadedHtml(ev.target?.result as string);
-    };
-    reader.readAsText(file);
-  };
-
   const [url, setUrl] = useState(initialValues?.url || DEFAULT_URL);
   const [brandGuidelines, setBrandGuidelines] = useState(initialValues?.brandGuidelines || DEFAULT_BRAND_GUIDELINES);
   const [customerQueries, setCustomerQueries] = useState(initialValues?.customerQueries || DEFAULT_CUSTOMER_QUERIES);
@@ -131,100 +115,29 @@ ${actionItems}`;
       url,
       brandGuidelines,
       geckoInsights,
-      uploadedHtml: inputMode === "upload" ? uploadedHtml : undefined,
       fields: { url, brandGuidelines, customerQueries, llmLinks, llmSources, llmAnswers, llmChainOfThought, actionItems },
     });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Page Source */}
+      {/* URL Input */}
       <div>
-        <div className="flex items-center justify-between mb-2">
-          <label className="block text-sm font-semibold text-gray-200">
-            Retailer Page
-          </label>
-          <div className="flex gap-1 bg-gray-800 rounded-lg p-0.5">
-            <button
-              type="button"
-              onClick={() => setInputMode("url")}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                inputMode === "url"
-                  ? "bg-emerald-600 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              URL
-            </button>
-            <button
-              type="button"
-              onClick={() => setInputMode("upload")}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                inputMode === "upload"
-                  ? "bg-emerald-600 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              Upload HTML
-            </button>
-          </div>
-        </div>
-
-        {inputMode === "url" ? (
-          <input
-            id="url"
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.retailer.com/product/example"
-            required={inputMode === "url"}
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
-          />
-        ) : (
-          <div className="space-y-2">
-            <input
-              id="url-for-upload"
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="Page URL (for reference and asset proxying)"
-              className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-sm"
-            />
-            <label
-              htmlFor="html-upload"
-              className={`flex items-center justify-center gap-3 w-full px-4 py-4 border-2 border-dashed rounded-lg cursor-pointer transition-all ${
-                uploadedHtml
-                  ? "border-emerald-500/50 bg-emerald-500/5"
-                  : "border-gray-700 hover:border-gray-600 bg-gray-800/50"
-              }`}
-            >
-              <input
-                id="html-upload"
-                type="file"
-                accept=".html,.htm"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              {uploadedHtml ? (
-                <>
-                  <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  <span className="text-emerald-400 text-sm font-medium">
-                    {uploadedFileName} ({Math.round(uploadedHtml.length / 1024)}KB)
-                  </span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <span className="text-gray-400 text-sm">Drop an HTML file or click to upload</span>
-                </>
-              )}
-            </label>
-          </div>
-        )}
+        <label
+          htmlFor="url"
+          className="block text-sm font-semibold text-gray-200 mb-2"
+        >
+          Retailer Page URL
+        </label>
+        <input
+          id="url"
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://www.retailer.com/product/example"
+          required
+          className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+        />
       </div>
 
       {/* Brand Guidelines */}
@@ -344,7 +257,7 @@ ${actionItems}`;
       {/* Submit */}
       <button
         type="submit"
-        disabled={isLoading || (!url && inputMode === "url") || (inputMode === "upload" && !uploadedHtml) || !customerQueries || !actionItems}
+        disabled={isLoading || !url || !customerQueries || !actionItems}
         className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-lg transition-all duration-200 flex items-center justify-center gap-3 text-lg cursor-pointer disabled:cursor-not-allowed"
       >
         {isLoading ? (
