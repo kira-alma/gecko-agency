@@ -7,7 +7,31 @@ export interface ScrapedPage {
   baseUrl: string;
 }
 
-export async function scrapePage(url: string): Promise<ScrapedPage> {
+/** Lightweight scraper using plain fetch — no headless browser, low memory */
+async function scrapeLightweight(url: string): Promise<ScrapedPage> {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml",
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch page: ${res.status} ${res.statusText}`);
+  }
+
+  const html = await res.text();
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].trim() : url;
+
+  const parsed = new URL(url);
+  const baseUrl = `${parsed.protocol}//${parsed.host}`;
+
+  return { html, title, url, baseUrl };
+}
+
+/** Full scraper using Playwright — renders JavaScript, higher memory usage */
+async function scrapeWithPlaywright(url: string): Promise<ScrapedPage> {
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -27,7 +51,6 @@ export async function scrapePage(url: string): Promise<ScrapedPage> {
 
   const page = await context.newPage();
 
-  // Block heavy resources to save memory on constrained servers
   await page.route("**/*", (route) => {
     const type = route.request().resourceType();
     if (["media", "websocket", "font", "image"].includes(type)) {
@@ -39,35 +62,26 @@ export async function scrapePage(url: string): Promise<ScrapedPage> {
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
-    // Wait for the body to have meaningful content
     await page.waitForFunction(
       () => document.body && document.body.innerHTML.length > 1000,
       { timeout: 15000 }
     ).catch(() => {});
 
-    // Give JS frameworks time to render and CSS to load
     await page.waitForTimeout(5000);
 
-    // Dismiss cookie banners, popups, and modals
+    // Dismiss popups
     await page.evaluate(() => {
-      // Click common dismiss/accept buttons
       const dismissSelectors = [
-        '[class*="cookie"] button',
-        '[class*="consent"] button',
-        '[id*="cookie"] button',
-        '[id*="consent"] button',
-        '[id*="onetrust"] button',
-        'button[class*="accept"]',
-        'button[class*="dismiss"]',
-        'button[class*="close"]',
-        '[aria-label="Close"]',
-        '[aria-label="close"]',
+        '[class*="cookie"] button', '[class*="consent"] button',
+        '[id*="cookie"] button', '[id*="consent"] button',
+        '[id*="onetrust"] button', 'button[class*="accept"]',
+        'button[class*="dismiss"]', 'button[class*="close"]',
+        '[aria-label="Close"]', '[aria-label="close"]',
       ];
       for (const sel of dismissSelectors) {
         const btn = document.querySelector(sel) as HTMLElement;
         if (btn) { btn.click(); break; }
       }
-      // Remove overlay/modal elements
       const removeSelectors = [
         '[class*="cookie"]', '[class*="Cookie"]',
         '[class*="consent"]', '[class*="Consent"]',
@@ -77,7 +91,6 @@ export async function scrapePage(url: string): Promise<ScrapedPage> {
       for (const sel of removeSelectors) {
         document.querySelectorAll(sel).forEach((el) => el.remove());
       }
-      // Unlock body scroll
       document.body.style.overflow = "auto";
       document.documentElement.style.overflow = "auto";
     });
@@ -91,5 +104,15 @@ export async function scrapePage(url: string): Promise<ScrapedPage> {
     return { html, title, url, baseUrl };
   } finally {
     await browser.close();
+  }
+}
+
+/** Scrape a page — tries Playwright first, falls back to lightweight fetch */
+export async function scrapePage(url: string): Promise<ScrapedPage> {
+  try {
+    return await scrapeWithPlaywright(url);
+  } catch (err) {
+    console.warn("Playwright scrape failed, falling back to lightweight fetch:", (err as Error).message);
+    return await scrapeLightweight(url);
   }
 }
