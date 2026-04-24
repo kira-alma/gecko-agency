@@ -26,6 +26,7 @@ function timeAgo(dateStr: string): string {
 
 export default function RunsList({ runs, activeRunId, onSelect, onDelete }: RunsListProps) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   if (runs.length === 0) {
     return (
@@ -35,9 +36,35 @@ export default function RunsList({ runs, activeRunId, onSelect, onDelete }: Runs
     );
   }
 
+  const filtered = search.trim()
+    ? runs.filter((r) => {
+        const q = search.toLowerCase();
+        return (
+          r.page_title.toLowerCase().includes(q) ||
+          r.page_url.toLowerCase().includes(q) ||
+          r.model.toLowerCase().includes(q)
+        );
+      })
+    : runs;
+
   return (
-    <div className="space-y-1.5">
-      {runs.map((run) => (
+    <div className="space-y-2">
+      <div className="relative">
+        <svg className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search runs..."
+          className="w-full pl-8 pr-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-transparent"
+        />
+      </div>
+      {filtered.length === 0 && (
+        <div className="text-center py-3 text-gray-500 text-xs">No matching runs</div>
+      )}
+      {filtered.map((run) => (
         <div
           key={run.id}
           onClick={() => onSelect(run.id)}

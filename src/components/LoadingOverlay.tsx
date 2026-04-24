@@ -62,7 +62,7 @@ export default function LoadingOverlay({ stage }: LoadingOverlayProps) {
         <p className="text-gray-400 text-sm">
           {stage === "scraping"
             ? "Loading the full page with JavaScript rendering..."
-            : "Claude is analyzing the page and applying GeckoCheck insights..."}
+            : "Now analyzing the page and applying GeckoCheck insights..."}
         </p>
 
         {/* Steps indicator */}
