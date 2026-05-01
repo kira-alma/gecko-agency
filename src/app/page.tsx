@@ -536,6 +536,35 @@ export default function Home() {
         genericPrompt: generated.genericPrompt || "",
         pageSpecificPrompt: generated.pageSpecificPrompt || "",
       });
+
+      // Save regenerated run
+      const runId = crypto.randomUUID();
+      setActiveRunId(runId);
+      fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: runId,
+          pageUrl: lastInputs.pageUrl,
+          pageTitle: lastInputs.pageTitle + " (re-gen)",
+          model: lastInputs.model,
+          brandGuidelines: lastInputs.brandGuidelines,
+          customerQueries: loadedFormValues?.customerQueries || "",
+          llmLinks: loadedFormValues?.llmLinks || "",
+          llmSources: loadedFormValues?.llmSources || "",
+          llmAnswers: loadedFormValues?.llmAnswers || "",
+          llmChainOfThought: loadedFormValues?.llmChainOfThought || "",
+          actionItems: loadedFormValues?.actionItems || "",
+          geckoInsights: lastInputs.geckoInsights,
+          systemPrompt: generated.systemPrompt || "",
+          userPrompt: "",
+          genericPrompt: generated.genericPrompt || "",
+          pageSpecificPrompt: generated.pageSpecificPrompt || "",
+          changesJson: JSON.stringify(generated.changes),
+          originalHtml: lastInputs.originalHtml,
+          modifiedHtml: generated.modifiedHtml,
+        }),
+      }).then(() => refreshRuns()).catch(console.error);
     } catch (err) {
       setError((err as Error).message);
     } finally {
