@@ -5,6 +5,7 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 export interface Change {
   id: string;
   selector: string;
+  originalText: string;
   originalSnippet: string;
   modifiedSnippet: string;
   description: string;
@@ -58,8 +59,9 @@ When optimizing an existing page, respond with a JSON array of changes:
   {
     "id": "change-1",
     "selector": "description of where in the page this element is",
-    "originalSnippet": "exact original text/HTML to find and replace",
-    "modifiedSnippet": "the new text/HTML to replace it with",
+    "originalText": "the exact visible TEXT content to find (NOT HTML tags — just the text a user would see on the page)",
+    "originalSnippet": "the HTML snippet containing that text (best effort — include the innermost tag wrapping it)",
+    "modifiedSnippet": "the new HTML to replace it with",
     "description": "Short description of what was changed",
     "reasoning": "3-5 sentence explanation",
     "sourceInsight": "Direct quote from insights",
@@ -67,7 +69,11 @@ When optimizing an existing page, respond with a JSON array of changes:
     "category": "content|seo|structure|branding"
   }
 ]
-IMPORTANT: originalSnippet must be an EXACT substring of the HTML. Include enough context to be unique.
+IMPORTANT MATCHING RULES:
+- "originalText" is the PRIMARY matching key. It must be the exact visible text as seen on the page (no HTML tags). This is what we search for.
+- "originalSnippet" is a SECONDARY matching key. It should be the HTML containing that text, but it does not need to be a perfect match since the HTML may have extra attributes.
+- For meta tags, titles, or structured data: use the content attribute value as originalText (e.g., for <meta name="description" content="xyz">, originalText should be "xyz").
+- For new sections being ADDED (not replacing existing content): set originalText to "" and originalSnippet to the HTML location marker (e.g., "</body>" or the last element before insertion).
 
 === CREATE MODE OUTPUT FORMAT ===
 When creating a new page, respond with JSON:
@@ -275,98 +281,198 @@ Execute ALL the GeckoCheck action items. Respond with the OPTIMIZE MODE JSON for
     return `<span data-gecko-change="${changeId}">${modified}</span>`;
   }
 
+  /** Find the enclosing HTML element around a text match position */
+  function findEnclosingElement(html: string, textIdx: number, textLen: number): { start: number; end: number } | null {
+    // Walk backwards to find the opening tag
+    let depth = 0;
+    let start = textIdx;
+    while (start > 0) {
+      start--;
+      if (html[start] === ">" && start < textIdx) {
+        // Check if this is a closing tag
+        let tagStart = start;
+        while (tagStart > 0 && html[tagStart] !== "<") tagStart--;
+        const tag = html.slice(tagStart, start + 1);
+        if (tag.startsWith("</")) {
+          depth++;
+        } else if (!tag.startsWith("<!") && !tag.endsWith("/>")) {
+          if (depth === 0) {
+            start = tagStart;
+            break;
+          }
+          depth--;
+        }
+      }
+    }
+
+    // Walk forwards to find the matching closing tag
+    let end = textIdx + textLen;
+    const openTag = html.slice(start).match(/^<(\w+)/);
+    if (openTag) {
+      const tagName = openTag[1];
+      let innerDepth = 1;
+      let pos = start + openTag[0].length;
+      const closeTag = `</${tagName}>`;
+      const openPattern = new RegExp(`<${tagName}[\\s>]`);
+      while (pos < html.length && innerDepth > 0) {
+        if (html.slice(pos).startsWith(closeTag)) {
+          innerDepth--;
+          if (innerDepth === 0) {
+            end = pos + closeTag.length;
+            break;
+          }
+          pos += closeTag.length;
+        } else if (openPattern.test(html.slice(pos, pos + tagName.length + 2))) {
+          innerDepth++;
+          pos++;
+        } else {
+          pos++;
+        }
+      }
+    }
+
+    if (start >= 0 && end > start) {
+      return { start, end };
+    }
+    return null;
+  }
+
   for (const change of changes) {
-    if (!change || !change.originalSnippet || !change.modifiedSnippet) {
+    if (!change || !change.modifiedSnippet) {
       console.warn("Skipping invalid change:", JSON.stringify(change)?.slice(0, 200));
       continue;
     }
-    const original = change.originalSnippet;
 
-    // Strategy 1: Exact match
-    if (modifiedHtml.includes(original)) {
+    const original = change.originalSnippet || "";
+    const originalText = change.originalText || "";
+    let matched = false;
+
+    // Strategy 1: Exact HTML snippet match
+    if (original && modifiedHtml.includes(original)) {
       modifiedHtml = modifiedHtml.replace(original, tagModified(change.modifiedSnippet, change.id));
-      appliedChanges.push(change);
-      continue;
+      matched = true;
     }
 
-    // Strategy 2: Match ignoring data-* and style attributes (LLM saw trimmed HTML)
-    try {
-      const escaped = original
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/\\s+/g, "\\s+");
-      // Allow optional attributes between tag name and the rest
-      const flexiblePattern = escaped.replace(
-        /(<\w+)(\\s)/g,
-        "$1(?:\\s+[\\w-]+=\"[^\"]*\")*$2"
-      );
-      const regex = new RegExp(flexiblePattern);
-      const match = modifiedHtml.match(regex);
-      if (match) {
-        modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
-        appliedChanges.push(change);
-        continue;
+    // Strategy 2: Text-based match (primary — uses originalText field)
+    if (!matched && originalText && originalText.length > 5) {
+      // Try exact text match
+      const textIdx = modifiedHtml.indexOf(originalText);
+      if (textIdx !== -1) {
+        const elem = findEnclosingElement(modifiedHtml, textIdx, originalText.length);
+        if (elem) {
+          const fullMatch = modifiedHtml.slice(elem.start, elem.end);
+          modifiedHtml = modifiedHtml.replace(fullMatch, tagModified(change.modifiedSnippet, change.id));
+          matched = true;
+        }
       }
-    } catch { /* regex too complex, try next strategy */ }
 
-    // Strategy 3: Whitespace-normalized match
-    try {
-      const normalizedEscaped = original
-        .replace(/\s+/g, " ")
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/ /g, "\\s+");
-      const regex = new RegExp(normalizedEscaped);
-      const match = modifiedHtml.match(regex);
-      if (match) {
-        modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
-        appliedChanges.push(change);
-        continue;
+      // Try whitespace-normalized text match
+      if (!matched) {
+        const normalizedText = originalText.replace(/\s+/g, " ").trim();
+        // Search through HTML stripping tags for text matching
+        const htmlText = modifiedHtml.replace(/<[^>]+>/g, "\x00").replace(/\s+/g, " ");
+        const normIdx = htmlText.indexOf(normalizedText);
+        if (normIdx !== -1) {
+          // Map back to original HTML position
+          let origPos = 0, strippedPos = 0;
+          while (strippedPos < normIdx && origPos < modifiedHtml.length) {
+            if (modifiedHtml[origPos] === "<") {
+              while (origPos < modifiedHtml.length && modifiedHtml[origPos] !== ">") origPos++;
+              origPos++;
+              strippedPos++; // for the \x00
+            } else {
+              origPos++;
+              strippedPos++;
+            }
+          }
+          const elem = findEnclosingElement(modifiedHtml, origPos, 1);
+          if (elem) {
+            const fullMatch = modifiedHtml.slice(elem.start, elem.end);
+            modifiedHtml = modifiedHtml.replace(fullMatch, tagModified(change.modifiedSnippet, change.id));
+            matched = true;
+          }
+        }
       }
-    } catch { /* ignore */ }
+    }
 
-    // Strategy 4: Try matching just the text content (strip tags from snippet, find in HTML)
-    try {
-      const textContent = original.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-      if (textContent.length > 20 && modifiedHtml.includes(textContent)) {
-        // Find the full HTML element containing this text
-        const idx = modifiedHtml.indexOf(textContent);
-        // Look backwards for the opening tag
-        let start = idx;
-        while (start > 0 && modifiedHtml[start - 1] !== ">") start--;
-        // Look forwards for closing tag after the text
-        let end = idx + textContent.length;
-        while (end < modifiedHtml.length && modifiedHtml[end] !== "<") end++;
-
-        const fullMatch = modifiedHtml.slice(start, end);
-        modifiedHtml = modifiedHtml.replace(fullMatch, tagModified(change.modifiedSnippet, change.id));
-        appliedChanges.push(change);
-        continue;
-      }
-    } catch { /* ignore */ }
-
-    // Strategy 5: Strip ALL attributes from the snippet and try to match tag structure + text
-    try {
-      const stripAttrs = (s: string) => s.replace(/<(\w+)\s[^>]*>/g, "<$1>").replace(/\s+/g, " ").trim();
-      const strippedOriginal = stripAttrs(original);
-      if (strippedOriginal.length > 30) {
-        // Build a regex that matches the same tags with any attributes
-        const escaped = strippedOriginal
+    // Strategy 3: Whitespace-normalized HTML snippet match
+    if (!matched && original) {
+      try {
+        const normalizedEscaped = original
+          .replace(/\s+/g, " ").trim()
           .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-          .replace(/<(\w+)>/g, "<$1[^>]*>")
-          .replace(/ /g, "\\s*");
-        const regex = new RegExp(escaped);
+          .replace(/ /g, "\\s+");
+        const regex = new RegExp(normalizedEscaped);
         const match = modifiedHtml.match(regex);
         if (match) {
           modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
-          appliedChanges.push(change);
-          continue;
+          matched = true;
         }
-      }
-    } catch { /* regex too complex */ }
+      } catch { /* regex too complex */ }
+    }
 
-    console.warn(`[${change.id}] No match found for: "${original.slice(0, 80)}..."`);
-    // Track as failed change
-    failedChanges.push(change);
+    // Strategy 4: Strip attributes from snippet, match tag structure + text
+    if (!matched && original) {
+      try {
+        const textContent = original.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        if (textContent.length > 15 && modifiedHtml.includes(textContent)) {
+          const idx = modifiedHtml.indexOf(textContent);
+          const elem = findEnclosingElement(modifiedHtml, idx, textContent.length);
+          if (elem) {
+            const fullMatch = modifiedHtml.slice(elem.start, elem.end);
+            modifiedHtml = modifiedHtml.replace(fullMatch, tagModified(change.modifiedSnippet, change.id));
+            matched = true;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Strategy 5: For meta/title changes, match by attribute
+    if (!matched && original) {
+      try {
+        if (original.includes('name="description"') || original.includes('name="title"')) {
+          const metaRegex = /<meta[^>]*name=["'](?:description|title)["'][^>]*>/i;
+          const match = modifiedHtml.match(metaRegex);
+          if (match) {
+            modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
+            matched = true;
+          }
+        } else if (original.includes("<title")) {
+          const titleRegex = /<title[^>]*>[\s\S]*?<\/title>/i;
+          const match = modifiedHtml.match(titleRegex);
+          if (match) {
+            modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
+            matched = true;
+          }
+        } else if (original.includes('property="og:')) {
+          const propMatch = original.match(/property=["']([^"']+)["']/);
+          if (propMatch) {
+            const ogRegex = new RegExp(`<meta[^>]*property=["']${propMatch[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>`, "i");
+            const match = modifiedHtml.match(ogRegex);
+            if (match) {
+              modifiedHtml = modifiedHtml.replace(match[0], tagModified(change.modifiedSnippet, change.id));
+              matched = true;
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Strategy 6: For insertions (empty originalText), insert before </body>
+    if (!matched && !originalText && !original) {
+      const insertPoint = modifiedHtml.lastIndexOf("</body>");
+      if (insertPoint !== -1) {
+        modifiedHtml = modifiedHtml.slice(0, insertPoint) + tagModified(change.modifiedSnippet, change.id) + "\n" + modifiedHtml.slice(insertPoint);
+        matched = true;
+      }
+    }
+
+    if (matched) {
+      appliedChanges.push(change);
+    } else {
+      console.warn(`[${change.id}] No match found for: text="${(originalText || "").slice(0, 50)}" snippet="${original.slice(0, 50)}..."`);
+      failedChanges.push(change);
+    }
   }
 
   console.log(`Applied ${appliedChanges.length}/${changes.length} changes`);
