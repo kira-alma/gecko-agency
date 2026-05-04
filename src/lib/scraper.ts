@@ -1,4 +1,5 @@
-import { chromium } from "playwright";
+import { chromium } from "playwright-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
 export interface ScrapedPage {
   html: string;
@@ -30,8 +31,9 @@ async function scrapeLightweight(url: string): Promise<ScrapedPage> {
   return { html, title, url, baseUrl };
 }
 
-/** Full scraper using Playwright — renders JavaScript, higher memory usage */
+/** Full scraper using Playwright with stealth — renders JavaScript, bypasses basic bot detection */
 async function scrapeWithPlaywright(url: string): Promise<ScrapedPage> {
+  chromium.use(StealthPlugin());
   const browser = await chromium.launch({
     headless: true,
     args: [
@@ -62,12 +64,33 @@ async function scrapeWithPlaywright(url: string): Promise<ScrapedPage> {
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
+    // Wait for content — longer wait for Cloudflare/bot challenge pages
     await page.waitForFunction(
       () => document.body && document.body.innerHTML.length > 1000,
       { timeout: 15000 }
     ).catch(() => {});
 
-    await page.waitForTimeout(5000);
+    // Check if we hit a Cloudflare challenge — wait longer for it to resolve
+    const isChallenge = await page.evaluate(() => {
+      const text = document.body?.innerText || "";
+      return text.includes("security verification") || text.includes("Checking your browser") || text.includes("Just a moment");
+    });
+
+    if (isChallenge) {
+      console.log("Detected Cloudflare challenge, waiting for resolution...");
+      await page.waitForFunction(
+        () => {
+          const text = document.body?.innerText || "";
+          return !text.includes("security verification") && !text.includes("Checking your browser") && !text.includes("Just a moment");
+        },
+        { timeout: 20000 }
+      ).catch(() => {
+        console.warn("Cloudflare challenge did not resolve within timeout");
+      });
+      await page.waitForTimeout(3000);
+    } else {
+      await page.waitForTimeout(5000);
+    }
 
     // Dismiss popups
     await page.evaluate(() => {
