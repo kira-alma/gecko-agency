@@ -40,6 +40,7 @@ interface InputFormProps {
   isLoading: boolean;
   selectedModel: string;
   initialValues?: FormFields;
+  capturedHtml?: string;
 }
 
 interface CollapsibleSectionProps {
@@ -87,12 +88,12 @@ function CollapsibleSection({
   );
 }
 
-export default function InputForm({ onSubmit, isLoading, selectedModel, initialValues }: InputFormProps) {
+export default function InputForm({ onSubmit, isLoading, selectedModel, initialValues, capturedHtml }: InputFormProps) {
   const [mode, setMode] = useState<"optimize" | "create">(initialValues?.mode || "optimize");
   const [projectDescription, setProjectDescription] = useState(initialValues?.projectDescription || "");
   const [designReferenceUrl, setDesignReferenceUrl] = useState(initialValues?.designReferenceUrl || "");
-  const [uploadedHtml, setUploadedHtml] = useState("");
-  const [uploadedFileName, setUploadedFileName] = useState("");
+  const [uploadedHtml, setUploadedHtml] = useState(capturedHtml || "");
+  const [uploadedFileName, setUploadedFileName] = useState(capturedHtml ? "Captured page" : "");
   const [url, setUrl] = useState(initialValues?.url || DEFAULT_URL);
   const [brandGuidelines, setBrandGuidelines] = useState(initialValues?.brandGuidelines || DEFAULT_BRAND_GUIDELINES);
   const [customerQueries, setCustomerQueries] = useState(initialValues?.customerQueries || DEFAULT_CUSTOMER_QUERIES);
@@ -176,34 +177,15 @@ ${actionItems}`;
             required={!uploadedHtml}
             className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
           />
-          {/* Upload HTML fallback */}
-          <div className="mt-2 flex items-center gap-2">
-            <label
-              htmlFor="html-fallback-upload"
-              className="text-xs text-gray-500 hover:text-emerald-400 cursor-pointer transition-colors flex items-center gap-1"
-            >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          {/* Capture / Upload fallback for sites that block scraping */}
+          {uploadedHtml ? (
+            <div className="mt-2 flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              {uploadedHtml
-                ? `Uploaded: ${uploadedFileName} (${Math.round(uploadedHtml.length / 1024)}KB)`
-                : "Or upload HTML if the site blocks scraping"}
-            </label>
-            <input
-              id="html-fallback-upload"
-              type="file"
-              accept=".html,.htm,.mhtml"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                setUploadedFileName(file.name);
-                const reader = new FileReader();
-                reader.onload = (ev) => setUploadedHtml(ev.target?.result as string);
-                reader.readAsText(file);
-              }}
-            />
-            {uploadedHtml && (
+              <span className="text-xs text-emerald-400 flex-1">
+                Page captured: {uploadedFileName} ({Math.round(uploadedHtml.length / 1024)}KB) — will use this instead of scraping
+              </span>
               <button
                 type="button"
                 onClick={() => { setUploadedHtml(""); setUploadedFileName(""); }}
@@ -211,8 +193,30 @@ ${actionItems}`;
               >
                 Remove
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <details className="mt-2">
+              <summary className="text-xs text-gray-500 hover:text-gray-300 cursor-pointer">
+                Site blocks scraping? Use page capture instead
+              </summary>
+              <div className="mt-2 bg-gray-800/50 border border-gray-700 rounded-lg p-3 space-y-3">
+                <div>
+                  <p className="text-xs text-gray-400 mb-2">
+                    <strong className="text-gray-300">Option 1: Bookmarklet</strong> — Drag this to your bookmarks bar, then click it on any page:
+                  </p>
+                  <a
+                    href={`javascript:void(fetch('${typeof window !== "undefined" ? window.location.origin : ""}/api/capture',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:document.documentElement.outerHTML,url:location.href,title:document.title})}).then(r=>r.json()).then(d=>{if(d.token){window.open('${typeof window !== "undefined" ? window.location.origin : ""}?capture='+d.token,'_blank')}else{alert('Capture failed')}}).catch(()=>alert('Could not reach GeckoCheck server')))`}
+                    className="inline-block px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded cursor-grab"
+                    onClick={(e) => e.preventDefault()}
+                    draggable
+                  >
+                    Capture for GeckoCheck
+                  </a>
+                  <p className="text-xs text-gray-500 mt-1">Drag the green button above to your bookmarks bar</p>
+                </div>
+              </div>
+            </details>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

@@ -55,12 +55,33 @@ export default function Home() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [loadedFormValues, setLoadedFormValues] = useState<FormFields | undefined>(undefined);
 
-  // Load runs list on mount
+  // Captured page state (from bookmarklet)
+  const [capturedHtml, setCapturedHtml] = useState("");
+  const [capturedUrl, setCapturedUrl] = useState("");
+
+  // Load runs list on mount + check for capture token
   useEffect(() => {
     fetch("/api/runs")
       .then((r) => r.json())
       .then((data) => { if (data.runs) setRuns(data.runs); })
       .catch(() => {});
+
+    // Check if this page was opened by the bookmarklet with a capture token
+    const params = new URLSearchParams(window.location.search);
+    const captureToken = params.get("capture");
+    if (captureToken) {
+      fetch(`/api/capture?token=${captureToken}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.html) {
+            setCapturedHtml(data.html);
+            setCapturedUrl(data.url || "");
+            // Clean URL
+            window.history.replaceState({}, "", window.location.pathname);
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const refreshRuns = () => {
@@ -1206,11 +1227,25 @@ ${result.changes.map((c, i) => {
                 )}
 
                 <InputForm
-                  key={activeRunId || "new"}
+                  key={activeRunId || capturedUrl || "new"}
                   onSubmit={handleSubmit}
                   isLoading={loadingStage !== null}
                   selectedModel={selectedModel}
-                  initialValues={loadedFormValues}
+                  initialValues={capturedUrl ? {
+                    ...loadedFormValues,
+                    url: capturedUrl,
+                    brandGuidelines: loadedFormValues?.brandGuidelines || "",
+                    customerQueries: loadedFormValues?.customerQueries || "",
+                    llmLinks: loadedFormValues?.llmLinks || "",
+                    llmSources: loadedFormValues?.llmSources || "",
+                    llmAnswers: loadedFormValues?.llmAnswers || "",
+                    llmChainOfThought: loadedFormValues?.llmChainOfThought || "",
+                    actionItems: loadedFormValues?.actionItems || "",
+                    mode: "optimize" as const,
+                    projectDescription: "",
+                    designReferenceUrl: "",
+                  } : loadedFormValues}
+                  capturedHtml={capturedHtml}
                 />
               </div>
             </main>
