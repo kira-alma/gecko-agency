@@ -35,6 +35,7 @@ interface InputFormProps {
     mode: "optimize" | "create";
     projectDescription: string;
     designReferenceUrl: string;
+    uploadedHtml?: string;
   }) => void;
   isLoading: boolean;
   selectedModel: string;
@@ -90,6 +91,8 @@ export default function InputForm({ onSubmit, isLoading, selectedModel, initialV
   const [mode, setMode] = useState<"optimize" | "create">(initialValues?.mode || "optimize");
   const [projectDescription, setProjectDescription] = useState(initialValues?.projectDescription || "");
   const [designReferenceUrl, setDesignReferenceUrl] = useState(initialValues?.designReferenceUrl || "");
+  const [uploadedHtml, setUploadedHtml] = useState("");
+  const [uploadedFileName, setUploadedFileName] = useState("");
   const [url, setUrl] = useState(initialValues?.url || DEFAULT_URL);
   const [brandGuidelines, setBrandGuidelines] = useState(initialValues?.brandGuidelines || DEFAULT_BRAND_GUIDELINES);
   const [customerQueries, setCustomerQueries] = useState(initialValues?.customerQueries || DEFAULT_CUSTOMER_QUERIES);
@@ -127,6 +130,7 @@ ${actionItems}`;
       mode,
       projectDescription,
       designReferenceUrl: mode === "create" ? designReferenceUrl : "",
+      uploadedHtml: uploadedHtml || undefined,
       fields: { url: mode === "create" ? "" : url, brandGuidelines, customerQueries, llmLinks, llmSources, llmAnswers, llmChainOfThought, actionItems, mode, projectDescription, designReferenceUrl: mode === "create" ? designReferenceUrl : "" },
     });
   };
@@ -169,9 +173,46 @@ ${actionItems}`;
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://www.retailer.com/product/example"
-            required
+            required={!uploadedHtml}
             className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
           />
+          {/* Upload HTML fallback */}
+          <div className="mt-2 flex items-center gap-2">
+            <label
+              htmlFor="html-fallback-upload"
+              className="text-xs text-gray-500 hover:text-emerald-400 cursor-pointer transition-colors flex items-center gap-1"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              {uploadedHtml
+                ? `Uploaded: ${uploadedFileName} (${Math.round(uploadedHtml.length / 1024)}KB)`
+                : "Or upload HTML if the site blocks scraping"}
+            </label>
+            <input
+              id="html-fallback-upload"
+              type="file"
+              accept=".html,.htm,.mhtml"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setUploadedFileName(file.name);
+                const reader = new FileReader();
+                reader.onload = (ev) => setUploadedHtml(ev.target?.result as string);
+                reader.readAsText(file);
+              }}
+            />
+            {uploadedHtml && (
+              <button
+                type="button"
+                onClick={() => { setUploadedHtml(""); setUploadedFileName(""); }}
+                className="text-xs text-red-400 hover:text-red-300"
+              >
+                Remove
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-4">

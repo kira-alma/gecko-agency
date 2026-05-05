@@ -130,11 +130,38 @@ async function scrapeWithPlaywright(url: string): Promise<ScrapedPage> {
   }
 }
 
+/** Check if scraped HTML is a bot protection page instead of real content */
+function isBotProtectionPage(html: string): boolean {
+  const lowerHtml = html.toLowerCase();
+  const indicators = [
+    "performing security verification",
+    "checking your browser",
+    "just a moment",
+    "enable javascript and cookies to continue",
+    "attention required! | cloudflare",
+    "ray id:",
+    "cf-browser-verification",
+    "challenge-platform",
+    "_cf_chl_opt",
+    "managed challenge",
+  ];
+  const matchCount = indicators.filter((i) => lowerHtml.includes(i)).length;
+  // If 2+ indicators match, it's likely a challenge page
+  return matchCount >= 2;
+}
+
 /** Scrape a page — tries Playwright first, falls back to lightweight fetch */
 export async function scrapePage(url: string): Promise<ScrapedPage> {
   try {
-    return await scrapeWithPlaywright(url);
+    const result = await scrapeWithPlaywright(url);
+    if (isBotProtectionPage(result.html)) {
+      throw new Error("BOT_PROTECTION: The site is behind Cloudflare bot protection and blocked the scraper. Please save the page from your browser (Ctrl+S / Cmd+S) and use Upload HTML mode.");
+    }
+    return result;
   } catch (err) {
+    if ((err as Error).message.startsWith("BOT_PROTECTION:")) {
+      throw err; // Don't fall back — the lightweight scraper will also be blocked
+    }
     console.warn("Playwright scrape failed, falling back to lightweight fetch:", (err as Error).message);
     return await scrapeLightweight(url);
   }

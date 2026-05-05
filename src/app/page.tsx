@@ -275,6 +275,7 @@ export default function Home() {
     mode: "optimize" | "create";
     projectDescription: string;
     designReferenceUrl: string;
+    uploadedHtml?: string;
   }) => {
     setError(null);
     setResult(null);
@@ -386,7 +387,17 @@ export default function Home() {
       // OPTIMIZE MODE — scrape existing page then generate changes
       let scraped: ScrapedData;
 
-      {
+      if (data.uploadedHtml) {
+        // User uploaded HTML directly (e.g. site blocked scraping)
+        setLoadingStage("scraping");
+        const parsed = data.url ? new URL(data.url) : null;
+        scraped = {
+          html: data.uploadedHtml,
+          title: data.url || "Uploaded Page",
+          url: data.url || "",
+          baseUrl: parsed ? `${parsed.protocol}//${parsed.host}` : "",
+        };
+      } else {
         setLoadingStage("scraping");
         const scrapeRes = await fetch("/api/scrape", {
           method: "POST",
